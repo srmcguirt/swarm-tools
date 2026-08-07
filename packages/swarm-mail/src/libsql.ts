@@ -98,7 +98,11 @@ export function convertPlaceholders(
 	const anyRegex = /=\s*ANY\(\$(\d+)\)/gi;
 	for (const match of sql.matchAll(anyRegex)) {
 		const paramIndex = Number.parseInt(match[1], 10) - 1;
-		if (paramIndex >= 0 && paramIndex < params.length && Array.isArray(params[paramIndex])) {
+		if (
+			paramIndex >= 0 &&
+			paramIndex < params.length &&
+			Array.isArray(params[paramIndex])
+		) {
 			anyParamIndices.add(paramIndex);
 		}
 	}
@@ -260,11 +264,47 @@ class LibSQLAdapter implements DatabaseAdapter {
 	}
 
 	async close(): Promise<void> {
+		// Best-effort checkpoint before close - reclaims WAL space without
+		// forcing contention on other live connections. Never blocks close:
+		// a busy/failed checkpoint must not leak the underlying connection.
+		try {
+			await this.client.execute("PRAGMA wal_checkpoint(TRUNCATE)");
+		} catch {
+			// non-fatal - checkpoint is best-effort
+		}
 		this.client.close();
 	}
 
 	async checkpoint(): Promise<void> {
 		await this.client.execute("PRAGMA wal_checkpoint(TRUNCATE)");
+	}
+}
+
+/**
+ * Retry an operation on SQLITE_BUSY / SQLITE_BUSY_RECOVERY with exponential backoff.
+ *
+ * Shared version of the pattern from scripts/purge-garbage.ts - every short-lived
+ * connection opened via createLibSQLAdapter goes through this, not just one-off
+ * scripts, since contention is proportional to call volume, not to any single
+ * operation.
+ */
+async function withSqliteBusyRetry<T>(
+	fn: () => Promise<T>,
+	retries = 5,
+	baseDelayMs = 150,
+): Promise<T> {
+	for (let attempt = 0; ; attempt++) {
+		try {
+			return await fn();
+		} catch (error) {
+			const code = (error as { code?: string } | undefined)?.code ?? "";
+			const isBusy = code === "SQLITE_BUSY" || code === "SQLITE_BUSY_RECOVERY";
+			if (!isBusy || attempt >= retries) {
+				throw error;
+			}
+			const delay = baseDelayMs * 2 ** attempt;
+			await new Promise((resolve) => setTimeout(resolve, delay));
+		}
 	}
 }
 
@@ -308,13 +348,15 @@ export async function createLibSQLAdapter(
 	const client = createClient(clientConfig);
 
 	// Verify connection with a simple query
-	await client.execute("SELECT 1");
+	await withSqliteBusyRetry(() => client.execute("SELECT 1"));
 
 	// CRITICAL: Enable incremental auto vacuum to prevent database bloat
 	// MUST be set BEFORE any tables are created - it's a one-time setting
 	// Incremental mode marks freed pages for reuse without blocking operations
 	// (unlike FULL vacuum which requires exclusive lock and rebuilds entire DB)
-	await client.execute("PRAGMA auto_vacuum = INCREMENTAL");
+	await withSqliteBusyRetry(() =>
+		client.execute("PRAGMA auto_vacuum = INCREMENTAL"),
+	);
 
 	// CRITICAL: Enable foreign key constraints
 	// libSQL enables FK by default, but we set it explicitly for:
@@ -322,22 +364,34 @@ export async function createLibSQLAdapter(
 	// 2. Self-documenting code (explicit contract)
 	// 3. Consistency with standard SQLite patterns
 	// Prevents orphaned references (e.g., 208 orphaned message_recipients in audit)
-	await client.execute("PRAGMA foreign_keys = ON");
+	await withSqliteBusyRetry(() => client.execute("PRAGMA foreign_keys = ON"));
 
-	// Set busy_timeout to 5 seconds for automatic retry on SQLITE_BUSY
-	// This prevents "database is locked" errors during concurrent access
-	await client.execute("PRAGMA busy_timeout = 5000");
+	// Set busy_timeout to 10 seconds for automatic retry on SQLITE_BUSY.
+	// Bumped from 5000 -> 10000: every hive_*/hivemind_* MCP call opens a
+	// fresh connection through this path (many short-lived OS processes
+	// against one WAL-mode file), so contention is proportional to call
+	// volume, not to any single operation's duration.
+	await withSqliteBusyRetry(() =>
+		client.execute("PRAGMA busy_timeout = 10000"),
+	);
 
 	// Enable WAL (Write-Ahead Logging) mode for better concurrent performance
 	// WAL allows readers to not block writers and vice versa
 	// This is especially beneficial for multi-agent coordination where multiple
 	// agents may be reading/writing events simultaneously
-	await client.execute("PRAGMA journal_mode = WAL");
+	await withSqliteBusyRetry(() => client.execute("PRAGMA journal_mode = WAL"));
 
-	// Checkpoint any abandoned WAL frames from prior process crashes
-	// This ensures data written by a previous short-lived process (e.g., swarm CLI)
-	// is flushed to the main DB file before we start reading
-	await client.execute("PRAGMA wal_checkpoint(TRUNCATE)");
+	// NOTE: this path used to force `PRAGMA wal_checkpoint(TRUNCATE)` here,
+	// unconditionally, on every single connection open - including pure
+	// reads. That is NOT required for correctness: WAL-mode readers see all
+	// committed data (WAL-resident or checkpointed) transparently, with no
+	// checkpoint needed. What it actually did was make every hive_*/
+	// hivemind_* MCP call (each a fresh process/connection) race every other
+	// concurrent call for the TRUNCATE checkpoint's exclusive lock. Under
+	// realistic concurrency this reproduces sustained SQLITE_BUSY and
+	// SQLITE_BUSY_RECOVERY storms under stress testing. Checkpointing still
+	// happens - just opportunistically on close() (best-effort, non-fatal)
+	// instead of unconditionally on every open.
 
 	return new LibSQLAdapter(client);
 }
