@@ -36,7 +36,26 @@ export {
   parseProjectConfig,
   DOC_OUTPUT_KINDS,
 } from "./config/schema.js";
-export type { ProjectConfig, DocOutputKind } from "./config/schema.js";
+export type {
+  ProjectConfig,
+  DocOutputKind,
+  SanitizationConfig,
+} from "./config/schema.js";
+
+// Sanitization gate — authoritative policy check over an assembled corpus,
+// run before any generator. Fails the build on leakage.
+export {
+  runSanitizationGate,
+  assertSanitized,
+  resolveSanitizationConfig,
+  SanitizationGateError,
+} from "./gate/sanitization-gate.js";
+export type {
+  GateCategory,
+  GateSeverity,
+  GateViolation,
+  GateResult,
+} from "./gate/sanitization-gate.js";
 
 // Template structure & generated-vs-authored markers.
 export {

@@ -80,4 +80,49 @@ describe("parseProjectConfig", () => {
       expect((err as Error).message).toContain("project.name");
     }
   });
+
+  test("sanitization config defaults: enabled, empty additive lists, warn-tier slop", () => {
+    const config = parseProjectConfig({
+      project: { name: "acme-widgets" },
+      source: { adapter: "git" },
+    });
+
+    expect(config.sanitization.enabled).toBe(true);
+    expect(config.sanitization.processTerms).toEqual([]);
+    expect(config.sanitization.allowlist).toEqual([]);
+    expect(config.sanitization.agentNames).toEqual([]);
+    expect(config.sanitization.disableDefaultProcessTerms).toBe(false);
+    expect(config.sanitization.slopEnabled).toBe(true);
+    expect(config.sanitization.slopSeverity).toBe("warn");
+  });
+
+  test("sanitization config accepts a per-project internal vocabulary override", () => {
+    const config = parseProjectConfig({
+      project: { name: "acme-widgets" },
+      source: { adapter: "git" },
+      sanitization: {
+        processTerms: ["tribe", "pod", "squad"],
+        allowlist: ["acme-swarm-widget"],
+        agentNames: ["InternalBotName"],
+        slopSeverity: "error",
+      },
+    });
+
+    expect(config.sanitization.processTerms).toEqual(["tribe", "pod", "squad"]);
+    expect(config.sanitization.allowlist).toEqual(["acme-swarm-widget"]);
+    expect(config.sanitization.agentNames).toEqual(["InternalBotName"]);
+    expect(config.sanitization.slopSeverity).toBe("error");
+    // built-in defaults are additive, not replaced
+    expect(config.sanitization.disableDefaultProcessTerms).toBe(false);
+  });
+
+  test("rejects an invalid sanitization.slopSeverity value", () => {
+    expect(() =>
+      parseProjectConfig({
+        project: { name: "x" },
+        source: { adapter: "git" },
+        sanitization: { slopSeverity: "critical" },
+      }),
+    ).toThrow(ProjectConfigValidationError);
+  });
 });

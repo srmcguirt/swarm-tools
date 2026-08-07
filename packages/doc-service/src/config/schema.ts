@@ -4,6 +4,38 @@ import { z } from "zod";
 export const DOC_OUTPUT_KINDS = ["runbooks", "wiki", "blog", "policy"] as const;
 export type DocOutputKind = (typeof DOC_OUTPUT_KINDS)[number];
 
+/**
+ * Sanitization gate config. All list fields are additive to the gate's
+ * built-in defaults (see `src/gate/terms.ts`) unless the matching
+ * `disableDefault*` flag is set — a project with its own internal
+ * vocabulary (e.g. "tribe", "pod", "squad") adds to the base policy
+ * instead of having to restate it.
+ */
+const SanitizationConfigSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    /** Extra standalone-word process terms, hard-fail like the built-ins. */
+    processTerms: z.array(z.string()).default([]),
+    /** Extra ambiguous terms matched via the ~sentence-context heuristic (see gate/matcher.ts) rather than as a bare word. */
+    contextualTerms: z.array(z.string()).default([]),
+    /** Extra phrases exempt even though they contain a denylisted term (e.g. a project-specific product name). */
+    allowlist: z.array(z.string()).default([]),
+    /** Known agent/bot account names (e.g. pulled from a live `agents` table) to hard-fail on sight. */
+    agentNames: z.array(z.string()).default([]),
+    /** Extra model/product self-identification phrases. */
+    modelNamePhrases: z.array(z.string()).default([]),
+    disableDefaultProcessTerms: z.boolean().default(false),
+    disableDefaultContextualTerms: z.boolean().default(false),
+    disableDefaultAllowlist: z.boolean().default(false),
+    disableDefaultModelNamePhrases: z.boolean().default(false),
+    /** AI-slop prose markers (delve, leverage-as-verb, ...) are heuristic and warn-only by default — see gate README section. */
+    slopEnabled: z.boolean().default(true),
+    slopSeverity: z.enum(["warn", "error"]).default("warn"),
+  })
+  .default({});
+
+export type SanitizationConfig = z.infer<typeof SanitizationConfigSchema>;
+
 const ProjectIdentitySchema = z.object({
   name: z.string().min(1, "project.name is required"),
   description: z.string().optional(),
@@ -54,6 +86,7 @@ export const ProjectConfigSchema = z.object({
   source: SourceSchema,
   style: StyleSchema,
   paths: PathsSchema,
+  sanitization: SanitizationConfigSchema,
 });
 
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
