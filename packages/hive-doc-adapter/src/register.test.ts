@@ -195,3 +195,66 @@ describe("hasLeakage", () => {
     expect(hasLeakage("~/.config/swarm-tools/swarm.db")).toBe(false);
   });
 });
+
+// ============================================================================
+// False positives — shared with the sanitization gate's allowlist. If these
+// diverge from doc-service/gate/sanitization-gate.test.ts, the two systems
+// disagree about what counts as leakage.
+// ============================================================================
+
+describe("translateRegister — false-positive avoidance", () => {
+  test("web workers, worker threads, and user agents survive untouched", () => {
+    const input =
+      "Implemented a worker pool backed by web workers for CPU-bound parsing. Each " +
+      "worker thread reports progress via postMessage. The server also logs the " +
+      "user agent string of every incoming request for analytics.";
+    const out = translateRegister(input);
+    expect(out).toBe(input);
+    expect(hasLeakage(out)).toBe(false);
+  });
+
+  test("service worker survives untouched", () => {
+    const input = "Registered a service worker to cache static assets offline.";
+    const out = translateRegister(input);
+    expect(out).toBe(input);
+  });
+
+  test("swarm-mail, swarm.db, and swarm-tools package/file names survive untouched", () => {
+    const input =
+      "getDatabasePath() in packages/swarm-mail/src/streams/index.ts always resolves " +
+      "to ~/.config/swarm-tools/swarm.db unless SWARM_DB_PATH is set.";
+    const out = translateRegister(input);
+    expect(out).toBe(input);
+    expect(hasLeakage(out)).toBe(false);
+  });
+
+  test("allowlisted phrase adjacent to real leakage: only the leakage is stripped", () => {
+    const out = translateRegister(
+      "The worker fixed the bug. The user agent string was unaffected.",
+    );
+    expect(out).toContain("user agent string");
+    expect(out).not.toMatch(/\bworker\b/i);
+  });
+
+  test("hasLeakage does not flag allowlisted phrases even when denylisted term appears first in the string", () => {
+    expect(hasLeakage("User agent parsing was added to the logger.")).toBe(
+      false,
+    );
+    expect(hasLeakage("Web worker support shipped in this release.")).toBe(
+      false,
+    );
+  });
+});
+
+describe("translateRegister — idempotency", () => {
+  test("running translation twice produces the same output", () => {
+    const input =
+      "The worker fixed the memory leak. The swarm scaffolded 61 packages. " +
+      "The coordinator spawned a subtask to fix the SQL injection in cursor.ts. " +
+      "DarkOcean reserved packages/hive-doc-adapter before editing. " +
+      "See `swarm_complete` for details. Web workers and user agents are unaffected.";
+    const once = translateRegister(input);
+    const twice = translateRegister(once);
+    expect(twice).toBe(once);
+  });
+});

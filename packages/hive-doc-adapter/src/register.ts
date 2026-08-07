@@ -34,7 +34,18 @@
  * table keeps the transform deterministic and testable; an LLM pass would
  * trade that guarantee away for prose polish this extraction layer doesn't
  * need (generators are free to do further light editing downstream).
+ *
+ * False-positive protection: "worker" and "agent" collide with real
+ * technical vocabulary (web worker, service worker, user agent). Reuses
+ * the sanitization gate's `DEFAULT_ALLOWLIST` + `buildAllowlistMask` (see
+ * doc-service/gate/matcher.ts) rather than a second hand-rolled allowlist —
+ * the two systems must agree on what counts as a legitimate compound, or
+ * this translator strips a phrase the gate would have let through
+ * unmodified.
  */
+
+import { buildAllowlistMask } from "doc-service/gate/matcher";
+import { DEFAULT_ALLOWLIST } from "doc-service/gate/terms";
 
 // ============================================================================
 // Agent identity stripping
@@ -108,6 +119,41 @@ function stripCodeSpans(text: string): { stripped: string; spans: string[] } {
 
 function restoreCodeSpans(text: string, spans: string[]): string {
   return text.replace(/\u0000(\d+)\u0000/g, (_m, i) => spans[Number(i)] ?? "");
+}
+
+/**
+ * Temporarily replace allowlisted phrases (web worker, user agent,
+ * swarm-mail, ...) with placeholders before the process-noun rewrites run,
+ * then restore them verbatim. Uses `buildAllowlistMask` to find phrase
+ * spans exactly the way the sanitization gate does, then swaps each masked
+ * span out — same placeholder-and-restore shape as `stripCodeSpans`, so a
+ * later transform pass structurally cannot see (or touch) either.
+ */
+function stripAllowlistedPhrases(
+  text: string,
+  allowlist: string[],
+): { stripped: string; spans: string[] } {
+  const mask = buildAllowlistMask(text, allowlist);
+  const spans: string[] = [];
+  let stripped = "";
+  let i = 0;
+  while (i < text.length) {
+    if (mask[i]) {
+      let j = i;
+      while (j < text.length && mask[j]) j++;
+      spans.push(text.slice(i, j));
+      stripped += `\u0001${spans.length - 1}\u0001`;
+      i = j;
+    } else {
+      stripped += text[i];
+      i++;
+    }
+  }
+  return { stripped, spans };
+}
+
+function restoreAllowlistedPhrases(text: string, spans: string[]): string {
+  return text.replace(/\u0001(\d+)\u0001/g, (_m, i) => spans[Number(i)] ?? "");
 }
 
 // ============================================================================
@@ -314,15 +360,18 @@ export function translateRegister(
   if (!text) return text;
 
   const { stripped, spans } = stripCodeSpans(text);
+  const { stripped: allowlistStripped, spans: allowlistSpans } =
+    stripAllowlistedPhrases(stripped, DEFAULT_ALLOWLIST);
 
   let out = stripAgentNames(
-    stripped,
+    allowlistStripped,
     buildAgentNamePattern(options.knownAgentNames ?? []),
   );
   out = applyStructuralRules(out);
   out = stripResidualProcessNouns(out);
   out = capitalizeSentences(out);
   out = cleanupWhitespace(out);
+  out = restoreAllowlistedPhrases(out, allowlistSpans);
 
   return restoreCodeSpans(out, spans);
 }
@@ -345,15 +394,31 @@ export const LEAKAGE_DENYLIST = [
   "agent",
 ] as const;
 
-/** True if any denylisted term appears as a standalone word outside code spans. */
+/**
+ * True if any denylisted term appears as a standalone word outside code
+ * spans and outside an allowlisted phrase (web worker, user agent,
+ * swarm-mail, ...). Uses the same `DEFAULT_ALLOWLIST` as `translateRegister`
+ * so this check can never flag text the translator was correct to leave
+ * untouched.
+ */
 export function hasLeakage(text: string, extraTerms: string[] = []): boolean {
   const { stripped } = stripCodeSpans(text);
+  const allowlistMask = buildAllowlistMask(stripped, DEFAULT_ALLOWLIST);
   const terms = [...LEAKAGE_DENYLIST, ...extraTerms];
   for (const term of terms) {
-    const re = new RegExp(`\\b${term}\\b`, "i");
-    const match = re.exec(stripped);
-    if (match && !isCodeAdjacent(stripped, match.index, match[0].length)) {
-      return true;
+    const re = new RegExp(`\\b${term}\\b`, "gi");
+    let match: RegExpExecArray | null;
+    // biome-ignore lint/suspicious/noAssignInExpressions: standard exec loop
+    while ((match = re.exec(stripped))) {
+      const start = match.index;
+      const end = start + match[0].length;
+      const inAllowlist = allowlistMask
+        .slice(start, end)
+        .some((masked) => masked);
+      if (!isCodeAdjacent(stripped, start, match[0].length) && !inAllowlist) {
+        return true;
+      }
+      if (match[0].length === 0) re.lastIndex++;
     }
   }
   return false;

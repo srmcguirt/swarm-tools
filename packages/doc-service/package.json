@@ -13,6 +13,14 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./gate/matcher": {
+      "import": "./dist/gate/matcher.js",
+      "types": "./dist/gate/matcher.d.ts"
+    },
+    "./gate/terms": {
+      "import": "./dist/gate/terms.js",
+      "types": "./dist/gate/terms.d.ts"
     }
   },
   "publishConfig": {
