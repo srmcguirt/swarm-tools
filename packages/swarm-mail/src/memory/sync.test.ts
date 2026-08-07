@@ -496,4 +496,130 @@ describe("Memory Sync", () => {
       expect(content).toContain("mem-file-only");
     });
   });
+
+  // ==========================================================================
+  // Export Sanitization Tests
+  // ==========================================================================
+
+  describe("syncMemories — export sanitization", () => {
+    const sanitizeTestDir = join(TEST_DIR, "sanitize-test");
+    const sanitizeHiveDir = join(sanitizeTestDir, ".hive");
+
+    beforeAll(() => {
+      mkdirSync(sanitizeHiveDir, { recursive: true });
+    });
+
+    test("internal process vocabulary is stripped from the git-tracked file", async () => {
+      const memoriesPath = join(sanitizeHiveDir, "memories.jsonl");
+      if (existsSync(memoriesPath)) rmSync(memoriesPath);
+
+      await db.query(
+        `INSERT INTO memories (id, content, metadata, collection, created_at)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          "mem-vocab-strip",
+          "The worker fixed the memory leak. The swarm scaffolded 61 packages. See `swarm_complete` for details.",
+          "{}",
+          "default",
+          new Date().toISOString(),
+        ],
+      );
+
+      await syncMemories(db, sanitizeHiveDir);
+
+      const content = readFileSync(memoriesPath, "utf-8");
+      expect(content).not.toMatch(/\bworker\b/i);
+      expect(content).not.toMatch(/\bswarm\b(?!_complete)/i);
+      // technical fact (command in a code span) survives untouched
+      expect(content).toContain("swarm_complete");
+      expect(content).toContain("61 packages");
+    });
+
+    test("technical facts (file paths, measurements) survive sanitization", async () => {
+      const memoriesPath = join(sanitizeHiveDir, "memories.jsonl");
+      if (existsSync(memoriesPath)) rmSync(memoriesPath);
+
+      await db.query(
+        `INSERT INTO memories (id, content, metadata, collection, created_at)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          "mem-facts-survive",
+          "The coordinator spawned a subtask to fix the SQL injection in packages/swarm-mail/src/hive/jsonl.ts. Reproduced in 4.2s.",
+          "{}",
+          "default",
+          new Date().toISOString(),
+        ],
+      );
+
+      await syncMemories(db, sanitizeHiveDir);
+
+      const content = readFileSync(memoriesPath, "utf-8");
+      expect(content).toContain("packages/swarm-mail/src/hive/jsonl.ts");
+      expect(content).toContain("4.2s");
+      expect(content).not.toMatch(/\bcoordinator\b/i);
+      expect(content).not.toMatch(/\bsubtask\b/i);
+    });
+
+    test("running sync twice on the same memory produces the same sanitized line (idempotent)", async () => {
+      const memoriesPath = join(sanitizeHiveDir, "memories.jsonl");
+      if (existsSync(memoriesPath)) rmSync(memoriesPath);
+
+      await db.query(
+        `INSERT INTO memories (id, content, metadata, collection, created_at)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          "mem-idempotent",
+          "The worker agent fixed the bug. The swarm coordinator verified it.",
+          "{}",
+          "default",
+          new Date().toISOString(),
+        ],
+      );
+
+      await syncMemories(db, sanitizeHiveDir);
+      const firstPass = readFileSync(memoriesPath, "utf-8");
+
+      await syncMemories(db, sanitizeHiveDir);
+      const secondPass = readFileSync(memoriesPath, "utf-8");
+
+      expect(secondPass).toBe(firstPass);
+    });
+
+    test("local DB row content is never mutated by export sanitization", async () => {
+      const memoriesPath = join(sanitizeHiveDir, "memories.jsonl");
+      if (existsSync(memoriesPath)) rmSync(memoriesPath);
+
+      const rawContent =
+        "The worker agent fixed the bug. The swarm coordinator verified it via swarm_complete.";
+
+      await db.query(
+        `INSERT INTO memories (id, content, metadata, collection, created_at)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          "mem-db-unmutated",
+          rawContent,
+          "{}",
+          "default",
+          new Date().toISOString(),
+        ],
+      );
+
+      await syncMemories(db, sanitizeHiveDir);
+      await syncMemories(db, sanitizeHiveDir); // twice, to also cover the self-import round trip
+
+      const dbResult = await db.query<{ content: string }>(
+        "SELECT content FROM memories WHERE id = $1",
+        ["mem-db-unmutated"],
+      );
+
+      // DB row is byte-for-byte the original, unsanitized text — the
+      // export transform only ever touches the on-disk copy.
+      expect(dbResult.rows[0].content).toBe(rawContent);
+
+      // Meanwhile the file *is* sanitized.
+      const content = readFileSync(memoriesPath, "utf-8");
+      expect(content).not.toMatch(/\bworker\b/i);
+      expect(content).not.toMatch(/\bcoordinator\b/i);
+    });
+  });
 });

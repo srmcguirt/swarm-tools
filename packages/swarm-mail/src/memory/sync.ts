@@ -23,6 +23,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { sanitizeForGitExport } from "../export-sanitize.js";
 import type { DatabaseAdapter } from "../types/database.js";
 
 // ============================================================================
@@ -117,6 +118,28 @@ export function parseMemoryJSONL(jsonl: string): MemoryExport[] {
   }
 
   return memories;
+}
+
+// ============================================================================
+// Sanitize (git-write boundary only — see export-sanitize.ts)
+// ============================================================================
+
+/**
+ * Sanitize the `information` field of every record in an exported
+ * memories JSONL string. Only used at the actual git-write call site
+ * (below, in `syncMemories`) — never touches the database.
+ */
+function sanitizeMemoryJSONL(jsonl: string): string {
+  if (!jsonl) return jsonl;
+  const memories = parseMemoryJSONL(jsonl);
+  const lines = memories.map((memory) =>
+    serializeMemoryToJSONL({
+      ...memory,
+      information:
+        sanitizeForGitExport(memory.information) ?? memory.information,
+    }),
+  );
+  return lines.join("\n");
 }
 
 // ============================================================================
@@ -376,8 +399,12 @@ export async function syncMemories(
     importResult = await importMemories(db, fileContent);
   }
 
-  // Step 2: Export all memories to file
-  const exportContent = await exportMemories(db);
+  // Step 2: Export all memories to file, sanitized for the git-tracked
+  // artifact. `exportMemories` itself stays raw (it's a general-purpose
+  // export function, not just the git-write path) — local DB rows are
+  // never touched here, only this in-memory copy about to hit disk.
+  const rawExportContent = await exportMemories(db);
+  const exportContent = sanitizeMemoryJSONL(rawExportContent);
   writeFileSync(memoriesPath, exportContent);
 
   // Count exported

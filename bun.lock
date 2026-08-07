@@ -188,6 +188,7 @@
         "debug": "^4.4.3",
         "drizzle-orm": "^0.41.0",
         "effect": "^3.19.12",
+        "hive-doc-adapter": "workspace:*",
         "minimatch": "^10.1.1",
         "nanoid": "^5.1.6",
         "proper-lockfile": "^4.1.2",
