@@ -453,62 +453,102 @@ describe("beads integration", () => {
   });
 
   describe("hive_create_epic", () => {
-    it("creates an epic with subtasks and syncs to JSONL", async () => {
-      const result = await hive_create_epic.execute(
-        {
-          epic_title: "Integration test epic",
-          epic_description: "Testing epic creation",
-          subtasks: [
-            { title: "Subtask 1", priority: 2 },
-            { title: "Subtask 2", priority: 3 },
-            { title: "Subtask 3", priority: 1 },
-          ],
-        },
-        mockContext,
+    it("creates an epic with subtasks and syncs to the hive-data mirror (never the working repo)", async () => {
+      const { mkdirSync, rmSync, existsSync, readFileSync } = await import(
+        "node:fs"
+      );
+      const { tmpdir } = await import("node:os");
+      const { execSync } = await import("node:child_process");
+      const { resolveHiveDataSlug, hiveDataProjectDir } = await import(
+        "swarm-mail"
       );
 
-      const epicResult = parseResponse<EpicCreateResult>(result);
-      createdBeadIds.push(epicResult.epic.id);
-      for (const subtask of epicResult.subtasks) {
-        createdBeadIds.push(subtask.id);
-      }
+      // Isolated hive-data fixture — the file-level default from
+      // test-preload.ts is deliberately a bogus non-git path, so this
+      // test must supply its own to exercise the real flush.
+      const hiveDataLocal = join(
+        tmpdir(),
+        `hive-create-epic-hive-data-${Date.now()}`,
+      );
+      mkdirSync(hiveDataLocal, { recursive: true });
+      execSync("git init -b main", { cwd: hiveDataLocal });
+      execSync('git config user.email "test@example.com"', {
+        cwd: hiveDataLocal,
+      });
+      execSync('git config user.name "Test User"', { cwd: hiveDataLocal });
+      execSync("git commit --allow-empty -m initial", { cwd: hiveDataLocal });
 
-      expect(epicResult.success).toBe(true);
-      expect(epicResult.epic.title).toBe("Integration test epic");
-      expect(epicResult.epic.issue_type).toBe("epic");
-      expect(epicResult.subtasks).toHaveLength(3);
+      const originalHiveDataRepo = process.env.HIVE_DATA_REPO;
+      process.env.HIVE_DATA_REPO = hiveDataLocal;
 
-      // Subtasks should have parent_id pointing to epic
-      // Verify via adapter since parent_id may not be in the output schema
-      for (const subtask of epicResult.subtasks) {
-        const subtaskBead = await adapter.getCell(TEST_PROJECT_KEY, subtask.id);
-        expect(subtaskBead).toBeDefined();
-        expect(subtaskBead!.parent_id).toBe(epicResult.epic.id);
-      }
+      try {
+        const result = await hive_create_epic.execute(
+          {
+            epic_title: "Integration test epic",
+            epic_description: "Testing epic creation",
+            subtasks: [
+              { title: "Subtask 1", priority: 2 },
+              { title: "Subtask 2", priority: 3 },
+              { title: "Subtask 3", priority: 1 },
+            ],
+          },
+          mockContext,
+        );
 
-      // NEW TEST: Verify cells are synced to JSONL immediately
-      const { readFileSync, existsSync } = await import("node:fs");
-      const { join } = await import("node:path");
-      const jsonlPath = join(TEST_PROJECT_KEY, ".hive", "issues.jsonl");
+        const epicResult = parseResponse<EpicCreateResult>(result);
+        createdBeadIds.push(epicResult.epic.id);
+        for (const subtask of epicResult.subtasks) {
+          createdBeadIds.push(subtask.id);
+        }
 
-      expect(existsSync(jsonlPath)).toBe(true);
+        expect(epicResult.success).toBe(true);
+        expect(epicResult.epic.title).toBe("Integration test epic");
+        expect(epicResult.epic.issue_type).toBe("epic");
+        expect(epicResult.subtasks).toHaveLength(3);
 
-      const jsonlContent = readFileSync(jsonlPath, "utf-8");
-      const lines = jsonlContent
-        .trim()
-        .split("\n")
-        .filter((l) => l);
-      const cells = lines.map((line) => JSON.parse(line));
+        // Subtasks should have parent_id pointing to epic
+        // Verify via adapter since parent_id may not be in the output schema
+        for (const subtask of epicResult.subtasks) {
+          const subtaskBead = await adapter.getCell(
+            TEST_PROJECT_KEY,
+            subtask.id,
+          );
+          expect(subtaskBead).toBeDefined();
+          expect(subtaskBead!.parent_id).toBe(epicResult.epic.id);
+        }
 
-      // Epic and all subtasks should be in JSONL
-      const epicInJsonl = cells.find((c) => c.id === epicResult.epic.id);
-      expect(epicInJsonl).toBeDefined();
-      expect(epicInJsonl!.title).toBe("Integration test epic");
+        // Cells are synced to the hive-data mirror, not the working repo.
+        expect(existsSync(join(TEST_PROJECT_KEY, ".hive"))).toBe(false);
 
-      for (const subtask of epicResult.subtasks) {
-        const subtaskInJsonl = cells.find((c) => c.id === subtask.id);
-        expect(subtaskInJsonl).toBeDefined();
-        expect(subtaskInJsonl!.parent_id).toBe(epicResult.epic.id);
+        const slug = await resolveHiveDataSlug(TEST_PROJECT_KEY);
+        const syncDir = hiveDataProjectDir(hiveDataLocal, slug);
+        const jsonlPath = join(syncDir, "issues.jsonl");
+        expect(existsSync(jsonlPath)).toBe(true);
+
+        const jsonlContent = readFileSync(jsonlPath, "utf-8");
+        const lines = jsonlContent
+          .trim()
+          .split("\n")
+          .filter((l) => l);
+        const cells = lines.map((line) => JSON.parse(line));
+
+        // Epic and all subtasks should be in the hive-data JSONL
+        const epicInJsonl = cells.find((c) => c.id === epicResult.epic.id);
+        expect(epicInJsonl).toBeDefined();
+        expect(epicInJsonl!.title).toBe("Integration test epic");
+
+        for (const subtask of epicResult.subtasks) {
+          const subtaskInJsonl = cells.find((c) => c.id === subtask.id);
+          expect(subtaskInJsonl).toBeDefined();
+          expect(subtaskInJsonl!.parent_id).toBe(epicResult.epic.id);
+        }
+      } finally {
+        if (originalHiveDataRepo === undefined) {
+          delete process.env.HIVE_DATA_REPO;
+        } else {
+          process.env.HIVE_DATA_REPO = originalHiveDataRepo;
+        }
+        rmSync(hiveDataLocal, { recursive: true, force: true });
       }
     });
 
@@ -2030,33 +2070,45 @@ describe("beads integration", () => {
   });
 
   describe("process exit hook", () => {
-    it("registers beforeExit hook that syncs dirty cells", async () => {
-      const { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } =
-        await import("node:fs");
+    it("registers beforeExit hook that syncs dirty cells to the hive-data mirror (never the working repo)", async () => {
+      const { mkdirSync, rmSync, readFileSync, existsSync } = await import(
+        "node:fs"
+      );
       const { join } = await import("node:path");
       const { tmpdir } = await import("node:os");
       const { execSync } = await import("node:child_process");
+      const { resolveHiveDataSlug, hiveDataProjectDir } = await import(
+        "swarm-mail"
+      );
 
-      // Create temp project
+      // Create temp project (no .hive/ - the exit hook must never create one)
       const tempProject = join(tmpdir(), `hive-exit-hook-test-${Date.now()}`);
-      const hiveDir = join(tempProject, ".hive");
-      mkdirSync(hiveDir, { recursive: true });
+      mkdirSync(tempProject, { recursive: true });
 
-      // Initialize git repo
-      execSync("git init", { cwd: tempProject });
+      // Isolated hive-data fixture for this test.
+      const hiveDataLocal = join(
+        tmpdir(),
+        `hive-exit-hook-hive-data-${Date.now()}`,
+      );
+      mkdirSync(hiveDataLocal, { recursive: true });
+      execSync("git init -b main", { cwd: hiveDataLocal });
       execSync('git config user.email "test@example.com"', {
-        cwd: tempProject,
+        cwd: hiveDataLocal,
       });
-      execSync('git config user.name "Test User"', { cwd: tempProject });
+      execSync('git config user.name "Test User"', { cwd: hiveDataLocal });
+      execSync("git commit --allow-empty -m initial", { cwd: hiveDataLocal });
 
-      // Initial commit with empty issues.jsonl
-      writeFileSync(join(hiveDir, "issues.jsonl"), "");
-      execSync("git add .", { cwd: tempProject });
-      execSync('git commit -m "initial"', { cwd: tempProject });
-
-      // Set working directory
+      // Set working directory + isolated HIVE_DATA_REPO
       const originalDir = getHiveWorkingDirectory();
       setHiveWorkingDirectory(tempProject);
+      const originalHiveDataRepo = process.env.HIVE_DATA_REPO;
+      process.env.HIVE_DATA_REPO = hiveDataLocal;
+
+      const slug = await resolveHiveDataSlug(tempProject);
+      const jsonlPath = join(
+        hiveDataProjectDir(hiveDataLocal, slug),
+        "issues.jsonl",
+      );
 
       try {
         // Create a cell (marks it dirty but don't sync)
@@ -2065,12 +2117,8 @@ describe("beads integration", () => {
           mockContext,
         );
 
-        // Verify cell is NOT in JSONL yet (only in PGLite)
-        const beforeContent = readFileSync(
-          join(hiveDir, "issues.jsonl"),
-          "utf-8",
-        );
-        expect(beforeContent.trim()).toBe("");
+        // Verify cell is NOT flushed to the hive-data mirror yet
+        expect(existsSync(jsonlPath)).toBe(false);
 
         // Simulate process exit by triggering beforeExit event
         process.emit("beforeExit", 0);
@@ -2078,11 +2126,9 @@ describe("beads integration", () => {
         // Wait for async flush to complete
         await new Promise((resolve) => setTimeout(resolve, 100));
 
-        // Verify cell was synced to JSONL by the exit hook
-        const afterContent = readFileSync(
-          join(hiveDir, "issues.jsonl"),
-          "utf-8",
-        );
+        // Verify cell was synced to the hive-data mirror by the exit hook
+        expect(existsSync(jsonlPath)).toBe(true);
+        const afterContent = readFileSync(jsonlPath, "utf-8");
         expect(afterContent.trim()).not.toBe("");
 
         const cells = afterContent
@@ -2091,28 +2137,60 @@ describe("beads integration", () => {
           .map((line) => JSON.parse(line));
         expect(cells).toHaveLength(1);
         expect(cells[0].title).toBe("Exit hook test cell");
+
+        // The working repo itself was never touched.
+        expect(existsSync(join(tempProject, ".hive"))).toBe(false);
       } finally {
         setHiveWorkingDirectory(originalDir);
+        if (originalHiveDataRepo === undefined) {
+          delete process.env.HIVE_DATA_REPO;
+        } else {
+          process.env.HIVE_DATA_REPO = originalHiveDataRepo;
+        }
         rmSync(tempProject, { recursive: true, force: true });
+        rmSync(hiveDataLocal, { recursive: true, force: true });
       }
     });
 
     it("exit hook is idempotent - safe to call multiple times", async () => {
-      const { mkdirSync, rmSync, writeFileSync, readFileSync } = await import(
+      const { mkdirSync, rmSync, readFileSync, existsSync } = await import(
         "node:fs"
       );
       const { join } = await import("node:path");
       const { tmpdir } = await import("node:os");
+      const { execSync } = await import("node:child_process");
+      const { resolveHiveDataSlug, hiveDataProjectDir } = await import(
+        "swarm-mail"
+      );
 
       // Create temp project
       const tempProject = join(tmpdir(), `hive-exit-hook-test-${Date.now()}`);
-      const hiveDir = join(tempProject, ".hive");
-      mkdirSync(hiveDir, { recursive: true });
-      writeFileSync(join(hiveDir, "issues.jsonl"), "");
+      mkdirSync(tempProject, { recursive: true });
 
-      // Set working directory
+      // Isolated hive-data fixture for this test.
+      const hiveDataLocal = join(
+        tmpdir(),
+        `hive-exit-hook-idempotent-hive-data-${Date.now()}`,
+      );
+      mkdirSync(hiveDataLocal, { recursive: true });
+      execSync("git init -b main", { cwd: hiveDataLocal });
+      execSync('git config user.email "test@example.com"', {
+        cwd: hiveDataLocal,
+      });
+      execSync('git config user.name "Test User"', { cwd: hiveDataLocal });
+      execSync("git commit --allow-empty -m initial", { cwd: hiveDataLocal });
+
+      // Set working directory + isolated HIVE_DATA_REPO
       const originalDir = getHiveWorkingDirectory();
       setHiveWorkingDirectory(tempProject);
+      const originalHiveDataRepo = process.env.HIVE_DATA_REPO;
+      process.env.HIVE_DATA_REPO = hiveDataLocal;
+
+      const slug = await resolveHiveDataSlug(tempProject);
+      const jsonlPath = join(
+        hiveDataProjectDir(hiveDataLocal, slug),
+        "issues.jsonl",
+      );
 
       try {
         // Create a cell
@@ -2129,7 +2207,8 @@ describe("beads integration", () => {
         await new Promise((resolve) => setTimeout(resolve, 50));
 
         // Verify cell is written only once (no duplication)
-        const content = readFileSync(join(hiveDir, "issues.jsonl"), "utf-8");
+        expect(existsSync(jsonlPath)).toBe(true);
+        const content = readFileSync(jsonlPath, "utf-8");
         const lines = content
           .trim()
           .split("\n")
@@ -2144,7 +2223,13 @@ describe("beads integration", () => {
         expect(uniqueIds.size).toBe(cells.length);
       } finally {
         setHiveWorkingDirectory(originalDir);
+        if (originalHiveDataRepo === undefined) {
+          delete process.env.HIVE_DATA_REPO;
+        } else {
+          process.env.HIVE_DATA_REPO = originalHiveDataRepo;
+        }
         rmSync(tempProject, { recursive: true, force: true });
+        rmSync(hiveDataLocal, { recursive: true, force: true });
       }
     });
 

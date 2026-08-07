@@ -486,6 +486,43 @@ let exitHookRunning = false;
  *
  * Idempotent - safe to call multiple times (only registers once)
  */
+/**
+ * Flush a project's dirty cells to its hive-data mirror
+ * (repos/<slug>/issues.jsonl), never the working repo's .hive/.
+ *
+ * Shared by the exit hook and hive_create_epic's immediate-visibility
+ * flush so both reuse the same resolution as hive_sync rather than
+ * duplicating (and risking re-drifting) the hive-data path logic.
+ * Throws HiveDataRepoError if the hive-data repo is missing/misconfigured
+ * — callers must not catch-and-fall-back to the working repo.
+ */
+async function flushCellsToHiveData(
+  projectKey: string,
+  adapter: HiveAdapter,
+): Promise<{
+  cellsExported: number;
+  hiveDataRoot: string;
+  syncDir: string;
+  slug: string;
+}> {
+  const hiveDataRoot = resolveHiveDataRepoRoot();
+  assertHiveDataRepoReady(hiveDataRoot);
+  assertHiveDataRepoNotMidMerge(hiveDataRoot);
+
+  const slug = await resolveHiveDataSlug(projectKey);
+  const syncDir = hiveDataProjectDir(hiveDataRoot, slug);
+  mkdirSync(syncDir, { recursive: true });
+
+  const flushManager = new FlushManager({
+    adapter,
+    projectKey,
+    outputPath: join(syncDir, "issues.jsonl"),
+  });
+
+  const { cellsExported } = await flushManager.flush();
+  return { cellsExported, hiveDataRoot, syncDir, slug };
+}
+
 function registerExitHook(): void {
   if (exitHookRegistered) {
     return; // Already registered
@@ -508,17 +545,12 @@ function registerExitHook(): void {
       for (const [projectKey, adapter] of adapterCache.entries()) {
         const flushPromise = (async () => {
           try {
-            ensureHiveDirectory(projectKey);
-            const flushManager = new FlushManager({
-              adapter,
-              projectKey,
-              outputPath: `${projectKey}/.hive/issues.jsonl`,
-            });
-            await flushManager.flush();
+            await flushCellsToHiveData(projectKey, adapter);
           } catch (error) {
-            // Non-fatal - log and continue
+            // Non-fatal - log and continue. Never falls back to writing
+            // the working repo's .hive/ - see flushCellsToHiveData.
             console.warn(
-              `[hive exit hook] Failed to flush ${projectKey}:`,
+              `[hive exit hook] Failed to flush ${projectKey} to hive-data:`,
               error instanceof Error ? error.message : String(error),
             );
           }
@@ -935,18 +967,15 @@ export const hive_create_epic = tool({
         );
       }
 
-      // Sync cells to JSONL so spawned workers can see them immediately
+      // Sync cells to the hive-data mirror (never the working repo's
+      // .hive/ - see flushCellsToHiveData). Spawned workers read cells
+      // via the DB/adapter, not this JSONL file, so this is purely for
+      // the git-tracked mirror to stay current.
       try {
-        ensureHiveDirectory(projectKey);
-        const flushManager = new FlushManager({
-          adapter,
-          projectKey,
-          outputPath: `${projectKey}/.hive/issues.jsonl`,
-        });
-        await flushManager.flush();
+        await flushCellsToHiveData(projectKey, adapter);
       } catch (error) {
         // Non-fatal - log and continue
-        console.warn("[hive_create_epic] Failed to sync to JSONL:", error);
+        console.warn("[hive_create_epic] Failed to sync to hive-data:", error);
       }
 
       return JSON.stringify(result, null, 2);
@@ -1689,39 +1718,32 @@ export const hive_sync = tool({
       }
     };
 
-    // 1. Resolve the hive-data repo. Fail loudly here — never silently
-    // fall back to writing the working repo's .hive/. That's exactly the
-    // regression this retarget exists to prevent.
-    const hiveDataRoot = resolveHiveDataRepoRoot();
+    // 1-2. Resolve the hive-data repo and flush cells into it. Fail
+    // loudly here — never silently fall back to writing the working
+    // repo's .hive/. That's exactly the regression this retarget exists
+    // to prevent. Shared with the exit hook and hive_create_epic via
+    // flushCellsToHiveData so all three reuse one resolution path.
+    let hiveDataRoot: string;
+    let syncDir: string;
+    let slug: string;
+    let flushResult: { cellsExported: number };
     try {
-      assertHiveDataRepoReady(hiveDataRoot);
-      assertHiveDataRepoNotMidMerge(hiveDataRoot);
+      const flushed = await withTimeout(
+        flushCellsToHiveData(projectKey, adapter),
+        TIMEOUT_MS,
+        "flush hive",
+      );
+      hiveDataRoot = flushed.hiveDataRoot;
+      syncDir = flushed.syncDir;
+      slug = flushed.slug;
+      flushResult = flushed;
     } catch (err) {
       if (err instanceof HiveDataRepoError) {
         throw new HiveError(err.message, "hive_sync");
       }
       throw err;
     }
-
-    // projectKey (the DB partition key / working-repo path) is untouched —
-    // only the slug used to name this project's hive-data folder is new.
-    const slug = await resolveHiveDataSlug(projectKey);
-    const syncDir = hiveDataProjectDir(hiveDataRoot, slug);
-    mkdirSync(syncDir, { recursive: true });
     const syncDirRelative = relative(hiveDataRoot, syncDir);
-
-    // 2. Flush cells to JSONL using FlushManager, writing into hive-data
-    const flushManager = new FlushManager({
-      adapter,
-      projectKey,
-      outputPath: join(syncDir, "issues.jsonl"),
-    });
-
-    const flushResult = await withTimeout(
-      flushManager.flush(),
-      TIMEOUT_MS,
-      "flush hive",
-    );
 
     // 2b. Sync memories into hive-data's global/project split. The DB has
     // no scope column yet — see syncProjectMemoriesToHiveData's doc for
