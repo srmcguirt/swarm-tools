@@ -31,7 +31,7 @@
   "author": "Joel Hooks",
   "license": "MIT",
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --target node --external @libsql/client --external @electric-sql/pglite --external hive-doc-adapter && bunx tsc",
+    "build": "bun build ./src/index.ts --outdir ./dist --target node --external @libsql/client --external @electric-sql/pglite && bunx tsc",
     "test": "bun test --timeout 60000 $(find src -name '*.test.ts' ! -name '*.integration.test.ts' | tr '\\n' ' ')",
     "test:integration": "bun test src/*.integration.test.ts src/**/*.integration.test.ts --timeout 120000",
     "test:all": "bun test src/ --timeout 120000",
@@ -47,7 +47,6 @@
     "debug": "^4.4.3",
     "drizzle-orm": "^0.41.0",
     "effect": "^3.19.12",
-    "hive-doc-adapter": "workspace:*",
     "minimatch": "^10.1.1",
     "nanoid": "^5.1.6",
     "proper-lockfile": "^4.1.2",

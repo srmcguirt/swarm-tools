@@ -7,10 +7,11 @@
  * vocabulary (swarm, worker, coordinator, subtask, agent) as sessions run.
  * This module strips that register at the git-write boundary only.
  *
- * Reuses hive-doc-adapter's `translateRegister`, which shares its
- * allowlist/denylist with doc-service's sanitization gate — see
- * hive-doc-adapter/src/register.ts. Not reimplemented here: a second
- * hand-rolled transform would drift from the gate's definition of leakage.
+ * Reuses `translateRegister`, vendored from doc-service/hive-doc-adapter
+ * (srmcguirt/docsmith) — see ./register-translate/translate-register.ts for
+ * why it's vendored rather than imported as a package. Not reimplemented
+ * from scratch here: a second hand-rolled transform would drift from the
+ * upstream gate's definition of leakage.
  *
  * Boundary: only called from the two actual git-write sites
  * (FlushManager.flush() for issues.jsonl, syncMemories() for
@@ -20,7 +21,7 @@
  * @module export-sanitize
  */
 
-import { translateRegister } from "hive-doc-adapter";
+import { translateRegister } from "./register-translate/translate-register.js";
 
 /**
  * Sanitize a single text field for the git-tracked export. Idempotent —

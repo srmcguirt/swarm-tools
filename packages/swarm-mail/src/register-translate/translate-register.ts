@@ -1,51 +1,32 @@
 /**
+ * Vendored from hive-doc-adapter's register.ts (srmcguirt/docsmith), where
+ * it originated for the doc-service extraction pipeline. Only
+ * `translateRegister` is used here — swarm-mail's git-write boundary
+ * (export-sanitize.ts) needs the same coordination-vocabulary stripping the
+ * doc-service sanitization gate enforces, without depending on the
+ * hive-doc-adapter package itself (see matcher.ts / terms.ts in this
+ * directory for why that dependency was dropped instead of kept).
+ *
  * Register translation: internal coordination vocabulary -> external prose.
  *
  * Hive cell text (descriptions, closure narratives, comments) is written by
  * and for AI coordination agents. It is full of process vocabulary — swarm,
  * worker, coordinator, cell, subtask, agent, session — plus generated agent
- * codenames (e.g. "DarkOcean", "WarmFire"). None of that has a field in the
- * IR (see ir/types.ts) and none of it should reach a generated doc: a reader
- * must not be able to tell how the work was organized.
- *
- * Approach: deterministic term-stripping + a curated set of structural
- * rewrite templates, NOT an LLM pass. Justification:
- *
- * - Testability: this runs at extraction/build time and must be assertable
- *   in a unit test with a fixed input/output pair. An LLM rewrite is not
- *   reproducible across runs, which breaks the sibling drift-detection cell
- *   (regeneration has to be idempotent against the same source data).
- * - Fact preservation: the hard constraint is "losing '23.79ms vs 38.64ms'
- *   is not fine." A generative rewrite can silently paraphrase or drop a
- *   number, a flag name, or a file path. A term-substitution pass structurally
- *   cannot touch anything it doesn't match — numbers, commands, and paths are
- *   never in the pattern set, so they pass through untouched by construction.
- * - Cost/latency: this can run over hundreds of records; a regex pass is
- *   effectively free, an LLM call per record is not.
- *
- * Honest limitation: this is NOT a general-purpose passivizer. It handles
- * the sentence shapes actually observed in this corpus (mined from real
- * hive data, see register.test.ts) plus the shapes given in the extraction
- * brief. A subject-led sentence with a verb outside the known list falls
- * through to the generic subject-drop rule, which is leakage-safe (no
- * process noun survives) but may read as a sentence fragment rather than
- * polished prose. If that turns out to be common on a larger corpus, the
- * fix is to grow the verb table, not to reach for an LLM — growing the
- * table keeps the transform deterministic and testable; an LLM pass would
- * trade that guarantee away for prose polish this extraction layer doesn't
- * need (generators are free to do further light editing downstream).
+ * codenames (e.g. "DarkOcean", "WarmFire"). Approach: deterministic
+ * term-stripping + a curated set of structural rewrite templates, NOT an
+ * LLM pass — reproducible, fact-preserving (numbers/paths/commands are
+ * never in the pattern set), and cheap enough to run over hundreds of
+ * records.
  *
  * False-positive protection: "worker" and "agent" collide with real
- * technical vocabulary (web worker, service worker, user agent). Reuses
- * the sanitization gate's `DEFAULT_ALLOWLIST` + `buildAllowlistMask` (see
- * doc-service/gate/matcher.ts) rather than a second hand-rolled allowlist —
- * the two systems must agree on what counts as a legitimate compound, or
- * this translator strips a phrase the gate would have let through
- * unmodified.
+ * technical vocabulary (web worker, service worker, user agent). Uses the
+ * same `DEFAULT_ALLOWLIST` + `buildAllowlistMask` as the doc-service
+ * sanitization gate did upstream (see matcher.ts), so this translator
+ * doesn't strip a phrase the gate would have let through unmodified.
  */
 
-import { buildAllowlistMask } from "doc-service/gate/matcher";
-import { DEFAULT_ALLOWLIST } from "doc-service/gate/terms";
+import { buildAllowlistMask } from "./matcher.js";
+import { DEFAULT_ALLOWLIST } from "./terms.js";
 
 // ============================================================================
 // Agent identity stripping
@@ -374,52 +355,4 @@ export function translateRegister(
   out = restoreAllowlistedPhrases(out, allowlistSpans);
 
   return restoreCodeSpans(out, spans);
-}
-
-/**
- * Denylist used by both this module's own tests and (optionally) by
- * callers who want a cheap leakage check without re-running translation.
- * Deliberately excludes generic English words that happen to overlap with
- * schema/table names (e.g. "cell", "bead") — those are ambiguous between
- * "SQLite table" (a technical fact, fine in provenance sourceRef) and
- * "work item" (process vocabulary, not fine in narrative prose). The
- * sibling sanitization gate is the authoritative enforcement point for
- * the full policy; this list covers the unambiguous actor/mechanism nouns.
- */
-export const LEAKAGE_DENYLIST = [
-  "swarm",
-  "worker",
-  "coordinator",
-  "subtask",
-  "agent",
-] as const;
-
-/**
- * True if any denylisted term appears as a standalone word outside code
- * spans and outside an allowlisted phrase (web worker, user agent,
- * swarm-mail, ...). Uses the same `DEFAULT_ALLOWLIST` as `translateRegister`
- * so this check can never flag text the translator was correct to leave
- * untouched.
- */
-export function hasLeakage(text: string, extraTerms: string[] = []): boolean {
-  const { stripped } = stripCodeSpans(text);
-  const allowlistMask = buildAllowlistMask(stripped, DEFAULT_ALLOWLIST);
-  const terms = [...LEAKAGE_DENYLIST, ...extraTerms];
-  for (const term of terms) {
-    const re = new RegExp(`\\b${term}\\b`, "gi");
-    let match: RegExpExecArray | null;
-    // biome-ignore lint/suspicious/noAssignInExpressions: standard exec loop
-    while ((match = re.exec(stripped))) {
-      const start = match.index;
-      const end = start + match[0].length;
-      const inAllowlist = allowlistMask
-        .slice(start, end)
-        .some((masked) => masked);
-      if (!isCodeAdjacent(stripped, start, match[0].length) && !inAllowlist) {
-        return true;
-      }
-      if (match[0].length === 0) re.lastIndex++;
-    }
-  }
-  return false;
 }
