@@ -265,6 +265,27 @@ export {
   createMemoryStore,
   EMBEDDING_DIM,
 } from "./memory/store";
+
+// Memory scope resolution (repo/package/global) - see memory/scope.ts
+export type { MemoryScope, ScopeInput } from "./memory/scope";
+export {
+  GLOBAL_SCOPE,
+  resolveMemoryScope,
+  resolveStoreScope,
+} from "./memory/scope";
+
+// Memory scope rename & orphan detection - see memory/rename-scope.ts
+export type {
+  OrphanedPackageKey,
+  OrphanedRepoKey,
+  RenameResult,
+} from "./memory/rename-scope";
+export {
+  findOrphanedPackageKeys,
+  findOrphanedRepoKeys,
+  renamePackageKey,
+  renameRepoKey,
+} from "./memory/rename-scope";
 export type {
   ExportOptions as MemoryExportOptions,
   ImportOptions as MemoryImportOptions,
@@ -280,7 +301,8 @@ export {
   syncMemories,
 } from "./memory/sync";
 
-// hive-data global/project memory split (interim, no scope column yet)
+// hive-data global/project memory split (predates repo_key/package_key
+// columns above; still the JSONL-side mechanism for hive_sync git export)
 export type {
   HiveDataMemorySyncOptions,
   HiveDataMemorySyncResult,

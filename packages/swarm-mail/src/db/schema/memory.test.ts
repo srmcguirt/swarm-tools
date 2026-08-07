@@ -30,7 +30,9 @@ describe("Memory Schema", () => {
         access_count TEXT DEFAULT '0',
         last_accessed TEXT DEFAULT (datetime('now')),
         category TEXT,
-        status TEXT DEFAULT 'active'
+        status TEXT DEFAULT 'active',
+        repo_key TEXT,
+        package_key TEXT
       )
     `);
 
@@ -45,12 +47,10 @@ describe("Memory Schema", () => {
       SELECT name, type, "notnull", dflt_value FROM pragma_table_info('memories')
     `);
 
-    expect(columns.rows).toHaveLength(18); // 9 original + 9 new columns (temporal, auto-tags, access tracking, status)
+    expect(columns.rows).toHaveLength(20); // 9 original + 9 (temporal, auto-tags, access tracking, status) + 2 scope (repo_key, package_key)
 
     // Check each column
-    const columnMap = new Map(
-      columns.rows.map((row) => [row.name, row])
-    );
+    const columnMap = new Map(columns.rows.map((row) => [row.name, row]));
 
     expect(columnMap.get("id")).toMatchObject({
       type: "TEXT",
@@ -114,7 +114,9 @@ describe("Memory Schema", () => {
         access_count TEXT DEFAULT '0',
         last_accessed TEXT DEFAULT (datetime('now')),
         category TEXT,
-        status TEXT DEFAULT 'active'
+        status TEXT DEFAULT 'active',
+        repo_key TEXT,
+        package_key TEXT
       )
     `);
 
@@ -166,12 +168,16 @@ describe("Memory Schema", () => {
         access_count TEXT DEFAULT '0',
         last_accessed TEXT DEFAULT (datetime('now')),
         category TEXT,
-        status TEXT DEFAULT 'active'
+        status TEXT DEFAULT 'active',
+        repo_key TEXT,
+        package_key TEXT
       )
     `);
 
     // Generate test vector (EMBEDDING_DIM dimensions)
-    const testVector = Array(EMBEDDING_DIM).fill(0).map((_, i) => i / EMBEDDING_DIM);
+    const testVector = Array(EMBEDDING_DIM)
+      .fill(0)
+      .map((_, i) => i / EMBEDDING_DIM);
 
     // Insert with vector using libSQL's vector() function
     await libsqlClient.execute({
@@ -180,7 +186,10 @@ describe("Memory Schema", () => {
     });
 
     // Query and verify
-    const results = await db.select().from(memories).where(eq(memories.id, "vec-test"));
+    const results = await db
+      .select()
+      .from(memories)
+      .where(eq(memories.id, "vec-test"));
 
     expect(results).toHaveLength(1);
     expect(results[0].embedding).toBeDefined();

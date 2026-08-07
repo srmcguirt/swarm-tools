@@ -64,7 +64,9 @@ describe("Memory Store (Drizzle) - Basic Operations", () => {
         access_count TEXT DEFAULT '0',
         last_accessed TEXT DEFAULT (datetime('now')),
         category TEXT,
-        status TEXT DEFAULT 'active'
+        status TEXT DEFAULT 'active',
+        repo_key TEXT,
+        package_key TEXT
       )
     `);
 
@@ -268,7 +270,9 @@ describe("Memory Store (Drizzle) - Vector Search", () => {
         access_count TEXT DEFAULT '0',
         last_accessed TEXT DEFAULT (datetime('now')),
         category TEXT,
-        status TEXT DEFAULT 'active'
+        status TEXT DEFAULT 'active',
+        repo_key TEXT,
+        package_key TEXT
       )
     `);
 

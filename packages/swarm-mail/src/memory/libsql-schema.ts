@@ -2,11 +2,11 @@
  * libSQL Memory Schema - FTS5 and Vector Extensions
  *
  * Provides FTS5 full-text search and vector indexes for memories table.
- * 
+ *
  * ## Schema Source of Truth
  * - **Table structure**: db/schema/memory.ts (Drizzle schema)
  * - **FTS5/vector DDL**: This file (raw SQL - Drizzle can't create these)
- * 
+ *
  * ## Synchronization
  * The memories table definition MUST match db/schema/memory.ts exactly.
  * Changes to table structure should be made in db/schema/memory.ts first,
@@ -86,7 +86,9 @@ export async function createLibSQLMemorySchema(db: Client): Promise<void> {
       access_count TEXT DEFAULT '0',
       last_accessed TEXT DEFAULT (datetime('now')),
       category TEXT,
-      status TEXT DEFAULT 'active'
+      status TEXT DEFAULT 'active',
+      repo_key TEXT,
+      package_key TEXT
     )
   `);
 
@@ -95,25 +97,53 @@ export async function createLibSQLMemorySchema(db: Client): Promise<void> {
   // ========================================================================
   // These ALTER TABLE statements are idempotent - they silently fail if column exists
   try {
-    await db.execute(`ALTER TABLE memories ADD COLUMN access_count TEXT DEFAULT '0'`);
-  } catch { /* column already exists */ }
+    await db.execute(
+      `ALTER TABLE memories ADD COLUMN access_count TEXT DEFAULT '0'`,
+    );
+  } catch {
+    /* column already exists */
+  }
   try {
-    await db.execute(`ALTER TABLE memories ADD COLUMN last_accessed TEXT DEFAULT (datetime('now'))`);
-  } catch { /* column already exists */ }
+    await db.execute(
+      `ALTER TABLE memories ADD COLUMN last_accessed TEXT DEFAULT (datetime('now'))`,
+    );
+  } catch {
+    /* column already exists */
+  }
   try {
     await db.execute(`ALTER TABLE memories ADD COLUMN category TEXT`);
-  } catch { /* column already exists */ }
+  } catch {
+    /* column already exists */
+  }
   try {
-    await db.execute(`ALTER TABLE memories ADD COLUMN status TEXT DEFAULT 'active'`);
-  } catch { /* column already exists */ }
+    await db.execute(
+      `ALTER TABLE memories ADD COLUMN status TEXT DEFAULT 'active'`,
+    );
+  } catch {
+    /* column already exists */
+  }
+  try {
+    await db.execute(`ALTER TABLE memories ADD COLUMN repo_key TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    await db.execute(`ALTER TABLE memories ADD COLUMN package_key TEXT`);
+  } catch {
+    /* column already exists */
+  }
 
   // SKOS Taxonomy fields for entities table
   try {
     await db.execute(`ALTER TABLE entities ADD COLUMN pref_label TEXT`);
-  } catch { /* column already exists */ }
+  } catch {
+    /* column already exists */
+  }
   try {
     await db.execute(`ALTER TABLE entities ADD COLUMN alt_labels TEXT`);
-  } catch { /* column already exists */ }
+  } catch {
+    /* column already exists */
+  }
 
   // ========================================================================
   // Memory Links Table (Zettelkasten-style bidirectional connections)
@@ -192,11 +222,22 @@ export async function createLibSQLMemorySchema(db: Client): Promise<void> {
   // ========================================================================
   // Indexes (Drizzle doesn't auto-create these)
   // ========================================================================
-  
+
   // Collection filtering index
   await db.execute(`
     CREATE INDEX IF NOT EXISTS idx_memories_collection 
     ON memories(collection)
+  `);
+
+  // Scope filtering indexes (repo/package scoping - see memory/scope.ts)
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_memories_repo_key
+    ON memories(repo_key)
+  `);
+
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_memories_scope
+    ON memories(repo_key, package_key)
   `);
 
   // Memory links indexes
@@ -264,7 +305,7 @@ export async function createLibSQLMemorySchema(db: Client): Promise<void> {
   // ========================================================================
   // FTS5 Virtual Table (raw SQL - Drizzle can't create virtual tables)
   // ========================================================================
-  
+
   // FTS5 virtual table for full-text search
   await db.execute(`
     CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts 
@@ -321,6 +362,8 @@ export async function dropLibSQLMemorySchema(db: Client): Promise<void> {
   await db.execute("DROP TABLE IF EXISTS memories_fts");
 
   // Drop indexes (some may be dropped automatically with tables)
+  await db.execute("DROP INDEX IF EXISTS idx_memories_scope");
+  await db.execute("DROP INDEX IF EXISTS idx_memories_repo_key");
   await db.execute("DROP INDEX IF EXISTS idx_memories_collection");
   await db.execute("DROP INDEX IF EXISTS idx_memory_links_source");
   await db.execute("DROP INDEX IF EXISTS idx_memory_links_target");
@@ -376,12 +419,28 @@ export async function validateLibSQLMemorySchema(db: Client): Promise<boolean> {
     `);
     const columnNames = columns.rows.map((r) => r.name);
     const required = [
-      "id", "content", "metadata", "collection", "tags",
-      "created_at", "updated_at", "decay_factor", "embedding",
-      "valid_from", "valid_until", "superseded_by", "auto_tags", "keywords",
-      "access_count", "last_accessed", "category", "status"
+      "id",
+      "content",
+      "metadata",
+      "collection",
+      "tags",
+      "created_at",
+      "updated_at",
+      "decay_factor",
+      "embedding",
+      "valid_from",
+      "valid_until",
+      "superseded_by",
+      "auto_tags",
+      "keywords",
+      "access_count",
+      "last_accessed",
+      "category",
+      "status",
+      "repo_key",
+      "package_key",
     ];
-    
+
     for (const col of required) {
       if (!columnNames.includes(col)) return false;
     }

@@ -99,7 +99,8 @@ export const memoryMigration: Migration = {
  */
 export const memoryMigrationLibSQL: Migration = {
   version: 9,
-  description: "Add semantic memory tables (memories with vector support, FTS5)",
+  description:
+    "Add semantic memory tables (memories with vector support, FTS5)",
   up: `
     -- ========================================================================
     -- Memories Table
@@ -183,7 +184,8 @@ export const memoryMigrationLibSQL: Migration = {
  */
 export const memorySchemaOverhaulLibSQL: Migration = {
   version: 10,
-  description: "Memory schema overhaul: links, entities, relationships, temporal fields",
+  description:
+    "Memory schema overhaul: links, entities, relationships, temporal fields",
   up: `
     -- ========================================================================
     -- Add temporal and metadata columns to memories table
@@ -291,7 +293,8 @@ export const memorySchemaOverhaulLibSQL: Migration = {
  */
 export const sessionMetadataExtensionLibSQL: Migration = {
   version: 11,
-  description: "Add session metadata columns (agent_type, session_id, message_role, message_idx, source_path)",
+  description:
+    "Add session metadata columns (agent_type, session_id, message_role, message_idx, source_path)",
   up: `
     -- ========================================================================
     -- Add session metadata columns to memories table
@@ -337,7 +340,8 @@ export const sessionMetadataExtensionLibSQL: Migration = {
  */
 export const memorySelfHealColumnsLibSQL: Migration = {
   version: 12,
-  description: "Schema convergence: self-heal missing columns (tags, updated_at, decay_factor, access_count, last_accessed, category, status)",
+  description:
+    "Schema convergence: self-heal missing columns (tags, updated_at, decay_factor, access_count, last_accessed, category, status)",
   up: `
     -- No-op: actual column additions handled by healMemorySchema() post-migration.
     -- This migration just bumps the version number.
@@ -350,6 +354,43 @@ export const memorySelfHealColumnsLibSQL: Migration = {
 };
 
 /**
+ * Migration v13 (libSQL): Add repo/package scope columns to memories
+ *
+ * Adds repo and package scoping to memories (see memory/scope.ts for
+ * resolution logic, memory/rename-scope.ts for the rename/orphan-detection
+ * path). Both columns are nullable - existing rows default to global
+ * (repo_key = NULL, package_key = NULL), which is safe because an
+ * unscoped-but-global memory over-surfaces rather than disappearing.
+ *
+ * Scope model:
+ * - global: repo_key IS NULL AND package_key IS NULL
+ * - repo:   repo_key = <slug>, package_key IS NULL
+ * - package: repo_key = <slug>, package_key = <repo-relative path>
+ *
+ * repo_key uses the same slug scheme as hive-data-repo.ts's
+ * resolveHiveDataSlug() (host/owner/repo from git remote, or a hash
+ * fallback) - intentionally not a second independent scheme.
+ */
+export const memoryScopeColumnsLibSQL: Migration = {
+  version: 13,
+  description:
+    "Add repo_key/package_key scope columns to memories (nullable, existing rows default to global)",
+  up: `
+    ALTER TABLE memories ADD COLUMN repo_key TEXT;
+    ALTER TABLE memories ADD COLUMN package_key TEXT;
+
+    CREATE INDEX IF NOT EXISTS idx_memories_repo_key ON memories(repo_key);
+    CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(repo_key, package_key);
+  `,
+  down: `
+    DROP INDEX IF EXISTS idx_memories_scope;
+    DROP INDEX IF EXISTS idx_memories_repo_key;
+    -- SQLite doesn't support DROP COLUMN until 3.35.0. Leaving repo_key/
+    -- package_key in place as NULL is safe if downgrading.
+  `,
+};
+
+/**
  * Export memory migrations array
  */
 export const memoryMigrations: Migration[] = [memoryMigration];
@@ -358,6 +399,7 @@ export const memoryMigrationsLibSQL: Migration[] = [
   memorySchemaOverhaulLibSQL,
   sessionMetadataExtensionLibSQL,
   memorySelfHealColumnsLibSQL,
+  memoryScopeColumnsLibSQL,
 ];
 
 /**
@@ -407,14 +449,14 @@ export interface OllamaEmbedder {
  */
 export async function repairStaleEmbeddings(
   db: { query: <T>(sql: string, params?: unknown[]) => Promise<{ rows: T[] }> },
-  ollama?: OllamaEmbedder
+  ollama?: OllamaEmbedder,
 ): Promise<RepairStats> {
   const stats: RepairStats = { repaired: 0, removed: 0 };
 
   // Find memories with null embeddings
   // In libSQL, F32_BLOB can be NULL when not set
   const staleMemories = await db.query<{ id: string; content: string }>(
-    `SELECT id, content FROM memories WHERE embedding IS NULL`
+    `SELECT id, content FROM memories WHERE embedding IS NULL`,
   );
 
   if (staleMemories.rows.length === 0) {
@@ -427,13 +469,13 @@ export async function repairStaleEmbeddings(
       try {
         // Generate new embedding
         const embedding = await ollama.embed(memory.content);
-        
+
         // Update memory with new embedding
         await db.query(
           `UPDATE memories SET embedding = vector($1) WHERE id = $2`,
-          [JSON.stringify(embedding), memory.id]
+          [JSON.stringify(embedding), memory.id],
         );
-        
+
         stats.repaired++;
       } catch (error) {
         // If embedding fails, remove the memory

@@ -30,6 +30,34 @@ import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import type { SwarmDb } from "../db/client.js";
 import { memories } from "../db/schema/memory.js";
 import { EMBEDDING_DIM } from "./ollama.js";
+import type { MemoryScope } from "./scope.js";
+
+/**
+ * Cache of whether a given db instance's `memories` table has the
+ * repo_key/package_key scope columns. Avoids checking on every store()
+ * call while still working correctly against test fixtures that
+ * hand-roll a pre-scoping `memories` table (no columns).
+ */
+const scopeColumnsCache = new WeakMap<SwarmDb, boolean>();
+
+async function hasScopeColumns(db: SwarmDb): Promise<boolean> {
+  const cached = scopeColumnsCache.get(db);
+  if (cached !== undefined) return cached;
+
+  let result = false;
+  try {
+    const rows = await db.all<{ name: string }>(
+      sql`SELECT name FROM pragma_table_info('memories')`,
+    );
+    const names = new Set(rows.map((r) => r.name));
+    result = names.has("repo_key") && names.has("package_key");
+  } catch {
+    result = false;
+  }
+
+  scopeColumnsCache.set(db, result);
+  return result;
+}
 
 // ============================================================================
 // Types
@@ -51,6 +79,10 @@ export interface Memory {
   readonly createdAt: Date;
   /** Confidence level (0.0-1.0) affecting decay rate. Higher = slower decay. Default 0.7 */
   readonly confidence?: number;
+  /** Repo scope key (see memory/scope.ts). Undefined = not written (legacy schema); null = global. */
+  readonly repoKey?: string | null;
+  /** Package scope key, repo-relative (see memory/scope.ts). Undefined = not written; null = repo-level/global. */
+  readonly packageKey?: string | null;
 }
 
 /** Search result with similarity score */
@@ -69,21 +101,30 @@ export interface SearchOptions {
   readonly trackAccess?: boolean;
   /** Filter by decay tier: 'hot' (7d), 'warm' (30d), 'all' (default) */
   readonly decayTier?: "hot" | "warm" | "all";
+  /**
+   * Restrict results to package ∪ repo ∪ global for this scope. Omitted
+   * (default): no scope filtering - matches pre-scoping behavior exactly.
+   */
+  readonly scope?: MemoryScope;
 }
 
 /** Decay tier thresholds (in days) */
 const DECAY_TIERS = {
-  hot: 7,      // Accessed in last 7 days
-  warm: 30,    // Accessed in last 30 days
-  cold: 90,    // Accessed more than 30 days ago
+  hot: 7, // Accessed in last 7 days
+  warm: 30, // Accessed in last 30 days
+  cold: 90, // Accessed more than 30 days ago
 } as const;
 
 /** Calculate decay tier based on last_accessed and access_count */
-export function getDecayTier(lastAccessed: Date | null, accessCount: number): "hot" | "warm" | "cold" {
+export function getDecayTier(
+  lastAccessed: Date | null,
+  accessCount: number,
+): "hot" | "warm" | "cold" {
   if (!lastAccessed) return "cold";
 
   const now = new Date();
-  const daysSinceAccess = (now.getTime() - lastAccessed.getTime()) / (1000 * 60 * 60 * 24);
+  const daysSinceAccess =
+    (now.getTime() - lastAccessed.getTime()) / (1000 * 60 * 60 * 24);
 
   // High frequency (10+ accesses) resists decay - add 7 days buffer
   const frequencyBonus = accessCount >= 10 ? 7 : accessCount >= 5 ? 3 : 0;
@@ -127,7 +168,7 @@ export function createMemoryStore(db: SwarmDb) {
     const metadata =
       typeof row.metadata === "string"
         ? JSON.parse(row.metadata)
-        : row.metadata ?? {};
+        : (row.metadata ?? {});
 
     // Parse created_at, falling back to current time if null/undefined/invalid
     //  row.created_at can be: null, undefined, valid ISO string, or malformed string
@@ -147,6 +188,8 @@ export function createMemoryStore(db: SwarmDb) {
       collection: row.collection ?? "default",
       createdAt,
       confidence: row.decay_factor ?? 0.7,
+      repoKey: (row as { repo_key?: string | null }).repo_key ?? null,
+      packageKey: (row as { package_key?: string | null }).package_key ?? null,
     };
   };
 
@@ -157,12 +200,24 @@ export function createMemoryStore(db: SwarmDb) {
      * Uses Drizzle's onConflictDoUpdate for UPSERT behavior.
      * Vector embedding stored via sql`` template with vector() function.
      *
+     * Note: Drizzle's insert builder always emits every column defined on
+     * the `memories` schema (db/schema/memory.ts), regardless of which
+     * keys are passed to `.values()` - so any physical table used with
+     * this function must have repo_key/package_key. Test fixtures that
+     * hand-roll a `memories` table must include them too (see
+     * memory/libsql-schema.ts's createLibSQLMemorySchema for the
+     * canonical column set).
+     *
      * @param memory - Memory to store
      * @param embedding - 1024-dimensional vector
      * @throws Error if database operation fails
      */
     async store(memory: Memory, embedding: number[]): Promise<void> {
       const vectorStr = JSON.stringify(embedding);
+      const scopeValues = {
+        repo_key: memory.repoKey ?? null,
+        package_key: memory.packageKey ?? null,
+      };
 
       await db
         .insert(memories)
@@ -174,6 +229,7 @@ export function createMemoryStore(db: SwarmDb) {
           created_at: memory.createdAt.toISOString(),
           decay_factor: memory.confidence ?? 0.7,
           embedding: sql`vector(${vectorStr})`,
+          ...scopeValues,
         })
         .onConflictDoUpdate({
           target: memories.id,
@@ -183,6 +239,7 @@ export function createMemoryStore(db: SwarmDb) {
             collection: memory.collection,
             decay_factor: memory.confidence ?? 0.7,
             embedding: sql`vector(${vectorStr})`,
+            ...scopeValues,
           },
         });
     },
@@ -205,9 +262,16 @@ export function createMemoryStore(db: SwarmDb) {
      */
     async search(
       queryEmbedding: number[],
-      options: SearchOptions = {}
+      options: SearchOptions = {},
     ): Promise<SearchResult[]> {
-      const { limit = 10, threshold = 0.3, collection, trackAccess: shouldTrack = false, decayTier = "all" } = options;
+      const {
+        limit = 10,
+        threshold = 0.3,
+        collection,
+        trackAccess: shouldTrack = false,
+        decayTier = "all",
+        scope,
+      } = options;
       const vectorStr = JSON.stringify(queryEmbedding);
 
       // Use vector_top_k for efficient ANN search via the vector index
@@ -222,14 +286,31 @@ export function createMemoryStore(db: SwarmDb) {
         : sql``;
 
       // Decay tier filter based on last_accessed
-      const decayFilter = decayTier === "hot"
-        ? sql`AND datetime(m.last_accessed) >= datetime('now', '-7 days')`
-        : decayTier === "warm"
-        ? sql`AND datetime(m.last_accessed) >= datetime('now', '-30 days')`
-        : sql``;
+      const decayFilter =
+        decayTier === "hot"
+          ? sql`AND datetime(m.last_accessed) >= datetime('now', '-7 days')`
+          : decayTier === "warm"
+            ? sql`AND datetime(m.last_accessed) >= datetime('now', '-30 days')`
+            : sql``;
 
       // Only return active memories (not superseded)
       const statusFilter = sql`AND (m.status IS NULL OR m.status = 'active' OR m.status = '''active''')`;
+
+      // Scope filtering (package ∪ repo ∪ global) - only applied when the
+      // caller explicitly passes a scope AND the table has the columns
+      // (keeps this backward compatible with pre-scoping test fixtures).
+      const scopeColumns = await hasScopeColumns(db);
+      const scopeSelect = scopeColumns
+        ? sql`, m.repo_key, m.package_key`
+        : sql``;
+      const scopeFilter =
+        scopeColumns && scope
+          ? sql`AND (
+              m.repo_key IS NULL
+              OR (m.repo_key = ${scope.repoKey} AND m.package_key IS NULL)
+              OR (m.repo_key = ${scope.repoKey} AND m.package_key = ${scope.packageKey})
+            )`
+          : sql``;
 
       let results = await db.all<{
         id: string;
@@ -250,7 +331,8 @@ export function createMemoryStore(db: SwarmDb) {
           m.created_at,
           m.decay_factor,
           m.access_count,
-          m.last_accessed,
+          m.last_accessed
+          ${scopeSelect},
           vector_distance_cos(m.embedding, vector(${vectorStr})) as distance
         FROM vector_top_k('idx_memories_embedding', vector(${vectorStr}), ${limit * 2}) AS v
         JOIN memories m ON m.rowid = v.id
@@ -258,6 +340,8 @@ export function createMemoryStore(db: SwarmDb) {
           ${collectionFilter}
           ${decayFilter}
           ${statusFilter}
+          ${scopeFilter}
+        ORDER BY distance ASC
         LIMIT ${limit}
       `);
 
@@ -285,7 +369,8 @@ export function createMemoryStore(db: SwarmDb) {
             m.created_at,
             m.decay_factor,
             m.access_count,
-            m.last_accessed,
+            m.last_accessed
+            ${scopeSelect},
             vector_distance_cos(m.embedding, vector(${vectorStr})) as distance
           FROM memories m
           WHERE m.embedding IS NOT NULL
@@ -293,6 +378,7 @@ export function createMemoryStore(db: SwarmDb) {
             ${collectionFilter}
             ${decayFilter}
             ${statusFilter}
+            ${scopeFilter}
           ORDER BY distance ASC
           LIMIT ${limit}
         `);
@@ -300,7 +386,7 @@ export function createMemoryStore(db: SwarmDb) {
 
       // Track access for returned memories
       if (shouldTrack && results.length > 0) {
-        await this.trackAccess(results.map(r => r.id));
+        await this.trackAccess(results.map((r) => r.id));
       }
 
       return results.map((row) => ({
@@ -322,13 +408,21 @@ export function createMemoryStore(db: SwarmDb) {
      */
     async ftsSearch(
       searchQuery: string,
-      options: SearchOptions = {}
+      options: SearchOptions = {},
     ): Promise<SearchResult[]> {
-      const { limit = 10, collection, trackAccess: shouldTrack = false, decayTier = "all" } = options;
+      const {
+        limit = 10,
+        collection,
+        trackAccess: shouldTrack = false,
+        decayTier = "all",
+        scope,
+      } = options;
 
       // Defense in depth: graceful degradation at store layer
-      if (!searchQuery || typeof searchQuery !== 'string') {
-        console.warn('[store] ftsSearch called with invalid query, returning empty results');
+      if (!searchQuery || typeof searchQuery !== "string") {
+        console.warn(
+          "[store] ftsSearch called with invalid query, returning empty results",
+        );
         return [];
       }
 
@@ -338,13 +432,29 @@ export function createMemoryStore(db: SwarmDb) {
       const quotedQuery = `"${searchQuery.replace(/"/g, '""')}"`;
 
       // Build filters
-      const collectionFilter = collection ? sql`AND m.collection = ${collection}` : sql``;
-      const decayFilter = decayTier === "hot"
-        ? sql`AND datetime(m.last_accessed) >= datetime('now', '-7 days')`
-        : decayTier === "warm"
-        ? sql`AND datetime(m.last_accessed) >= datetime('now', '-30 days')`
+      const collectionFilter = collection
+        ? sql`AND m.collection = ${collection}`
         : sql``;
+      const decayFilter =
+        decayTier === "hot"
+          ? sql`AND datetime(m.last_accessed) >= datetime('now', '-7 days')`
+          : decayTier === "warm"
+            ? sql`AND datetime(m.last_accessed) >= datetime('now', '-30 days')`
+            : sql``;
       const statusFilter = sql`AND (m.status IS NULL OR m.status = 'active' OR m.status = '''active''')`;
+
+      const scopeColumns = await hasScopeColumns(db);
+      const scopeSelect = scopeColumns
+        ? sql`, m.repo_key, m.package_key`
+        : sql``;
+      const scopeFilter =
+        scopeColumns && scope
+          ? sql`AND (
+              m.repo_key IS NULL
+              OR (m.repo_key = ${scope.repoKey} AND m.package_key IS NULL)
+              OR (m.repo_key = ${scope.repoKey} AND m.package_key = ${scope.packageKey})
+            )`
+          : sql``;
 
       const results = await db.all<{
         id: string;
@@ -361,7 +471,8 @@ export function createMemoryStore(db: SwarmDb) {
           m.metadata,
           m.collection,
           m.created_at,
-          m.decay_factor,
+          m.decay_factor
+          ${scopeSelect},
           fts.rank as score
         FROM memories_fts fts
         JOIN memories m ON m.rowid = fts.rowid
@@ -369,13 +480,14 @@ export function createMemoryStore(db: SwarmDb) {
           ${collectionFilter}
           ${decayFilter}
           ${statusFilter}
+          ${scopeFilter}
         ORDER BY fts.rank
         LIMIT ${limit}
       `);
 
       // Track access for returned memories
       if (shouldTrack && results.length > 0) {
-        await this.trackAccess(results.map(r => r.id));
+        await this.trackAccess(results.map((r) => r.id));
       }
 
       return results.map((row) => ({
@@ -439,7 +551,10 @@ export function createMemoryStore(db: SwarmDb) {
         SET
           access_count = CAST(COALESCE(CAST(access_count AS INTEGER), 0) + 1 AS TEXT),
           last_accessed = datetime('now')
-        WHERE id IN (${sql.join(idArray.map(id => sql`${id}`), sql`, `)})
+        WHERE id IN (${sql.join(
+          idArray.map((id) => sql`${id}`),
+          sql`, `,
+        )})
       `);
     },
 

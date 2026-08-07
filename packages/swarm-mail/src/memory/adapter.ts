@@ -96,13 +96,30 @@ import { Effect } from "effect";
 import { randomBytes } from "node:crypto";
 import { eq, and, lte, gte, or, isNull, sql } from "drizzle-orm";
 import type { SwarmDb } from "../db/client.js";
-import { memories, memoryLinks, entities, relationships, memoryEntities, type MemoryLink, type Entity, type Relationship } from "../db/schema/memory.js";
+import {
+  memories,
+  memoryLinks,
+  entities,
+  relationships,
+  memoryEntities,
+  type MemoryLink,
+  type Entity,
+  type Relationship,
+} from "../db/schema/memory.js";
 import { createMemoryStore, type Memory, type SearchResult } from "./store.js";
 import { makeOllamaLive, Ollama, type MemoryConfig } from "./ollama.js";
+import {
+  resolveStoreScope,
+  type MemoryScope,
+  type ScopeInput,
+} from "./scope.js";
 import type { LinkType } from "./memory-linking.js";
 import type { EntityType } from "./entity-extraction.js";
 import type { AutoTagResult as AutoTagServiceResult } from "./auto-tagger.js";
-import { projectSearchResults, type FieldSelection } from "../sessions/pagination.js";
+import {
+  projectSearchResults,
+  type FieldSelection,
+} from "../sessions/pagination.js";
 
 // ============================================================================
 // Types
@@ -148,6 +165,12 @@ export interface StoreOptions {
   readonly autoLink?: boolean;
   /** Extract and link entities */
   readonly extractEntities?: boolean;
+  /**
+   * Scope decision for this memory. Default `"auto"`: infer repo/package
+   * from the adapter's project path. Pass `"global"` to force a
+   * cross-project memory regardless of cwd.
+   */
+  readonly scope?: ScopeInput;
 }
 
 /**
@@ -168,6 +191,14 @@ export interface FindOptions {
   readonly trackAccess?: boolean;
   /** Filter by decay tier: 'hot' (7d), 'warm' (30d), 'all' (default) */
   readonly decayTier?: "hot" | "warm" | "all";
+  /**
+   * Restrict results to package ∪ repo ∪ global for this scope. Omitted
+   * (default): unscoped search across all memories, matching pre-scoping
+   * behavior exactly. Pass `"auto"` to scope to the adapter's project
+   * path, `"global"` to search only global memories, or a concrete
+   * `MemoryScope` to reuse a previously-resolved scope.
+   */
+  readonly scope?: ScopeInput;
 }
 
 /**
@@ -228,11 +259,30 @@ function chunkText(text: string, maxChars: number, overlap: number): string[] {
  *
  * @param db - Drizzle database instance (libSQL)
  * @param config - Ollama configuration
+ * @param adapterOptions - Adapter-level options (e.g. projectPath for scope resolution)
  * @returns Memory adapter instance
  */
-export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
+export function createMemoryAdapter(
+  db: SwarmDb,
+  config: MemoryConfig,
+  adapterOptions: { projectPath?: string } = {},
+) {
   const store = createMemoryStore(db);
   const ollamaLayer = makeOllamaLive(config);
+  const projectPath = adapterOptions.projectPath ?? process.cwd();
+
+  // "auto" scope resolution shells out to git - memoize per adapter
+  // instance so repeated store()/find() calls don't re-spawn it.
+  let cachedAutoScope: MemoryScope | undefined;
+  const resolveScope = async (input?: ScopeInput): Promise<MemoryScope> => {
+    if (input === undefined || input === "auto") {
+      if (!cachedAutoScope) {
+        cachedAutoScope = await resolveStoreScope(projectPath, "auto");
+      }
+      return cachedAutoScope;
+    }
+    return resolveStoreScope(projectPath, input);
+  };
 
   /**
    * Generate embedding for text using Ollama
@@ -245,7 +295,7 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
     if (text.length > MAX_CHARS_PER_CHUNK) {
       console.warn(
         `⚠️  Text length (${text.length} chars) exceeds limit (${MAX_CHARS_PER_CHUNK} chars). ` +
-        `Auto-chunking into smaller segments for embedding.`
+          `Auto-chunking into smaller segments for embedding.`,
       );
 
       const chunks = chunkText(text, MAX_CHARS_PER_CHUNK, CHUNK_OVERLAP);
@@ -259,7 +309,7 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
         });
 
         const result = await Effect.runPromise(
-          program.pipe(Effect.provide(ollamaLayer), Effect.either)
+          program.pipe(Effect.provide(ollamaLayer), Effect.either),
         );
 
         if (result._tag === "Left") {
@@ -286,7 +336,7 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
     });
 
     const result = await Effect.runPromise(
-      program.pipe(Effect.provide(ollamaLayer), Effect.either)
+      program.pipe(Effect.provide(ollamaLayer), Effect.either),
     );
 
     if (result._tag === "Left") {
@@ -318,8 +368,12 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
    * @param confidence - Confidence level (0.0-1.0)
    * @returns Decay factor (0.0-1.0)
    */
-  const calculateDecayFactor = (createdAt: Date, confidence: number): number => {
-    const ageInDays = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
+  const calculateDecayFactor = (
+    createdAt: Date,
+    confidence: number,
+  ): number => {
+    const ageInDays =
+      (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
     const halfLife = 90 * (0.5 + confidence);
     return 0.5 ** (ageInDays / halfLife);
   };
@@ -331,7 +385,7 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
     return results.map((result) => {
       const decayFactor = calculateDecayFactor(
         result.memory.createdAt,
-        result.memory.confidence ?? 0.7
+        result.memory.confidence ?? 0.7,
       );
       return {
         ...result,
@@ -350,7 +404,10 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
       return tags.map((t) => String(t).trim()).filter(Boolean);
     }
     // Handle string input (comma-separated)
-    return tags.split(",").map((t) => t.trim()).filter(Boolean);
+    return tags
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
   };
 
   /**
@@ -366,7 +423,7 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
    */
   const analyzeSmartOperation = async (
     information: string,
-    existingMemories: SearchResult[]
+    existingMemories: SearchResult[],
   ): Promise<SmartOpResult> => {
     try {
       // Dynamic import to avoid circular dependencies
@@ -387,21 +444,37 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
         case "ADD":
           return { operation: "ADD", reason: result.reason };
         case "UPDATE":
-          return { operation: "UPDATE", reason: result.reason, targetId: result.memoryId };
+          return {
+            operation: "UPDATE",
+            reason: result.reason,
+            targetId: result.memoryId,
+          };
         case "DELETE":
-          return { operation: "DELETE", reason: result.reason, targetId: result.memoryId };
+          return {
+            operation: "DELETE",
+            reason: result.reason,
+            targetId: result.memoryId,
+          };
         case "NOOP":
           return { operation: "NOOP", reason: result.reason };
       }
     } catch (error) {
       // Graceful degradation: fallback to simple heuristics on error
-      console.warn("analyzeMemoryOperation failed, using fallback heuristics:", error);
+      console.warn(
+        "analyzeMemoryOperation failed, using fallback heuristics:",
+        error,
+      );
 
       if (existingMemories.length === 0) {
-        return { operation: "ADD", reason: "No similar memories found - adding as new" };
+        return {
+          operation: "ADD",
+          reason: "No similar memories found - adding as new",
+        };
       }
 
-      const exactMatch = existingMemories.find((r) => r.memory.content === information);
+      const exactMatch = existingMemories.find(
+        (r) => r.memory.content === information,
+      );
       if (exactMatch) {
         return {
           operation: "NOOP",
@@ -420,7 +493,7 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
    */
   const autoGenerateTags = async (
     content: string,
-    existingTags?: string[]
+    existingTags?: string[],
   ): Promise<AutoTagServiceResult | undefined> => {
     try {
       // Dynamic import to avoid circular dependencies
@@ -447,7 +520,7 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
    */
   const autoLinkMemories = async (
     memoryId: string,
-    content: string
+    content: string,
   ): Promise<Array<{ memory_id: string; link_type: LinkType }> | undefined> => {
     try {
       // Dynamic import to avoid circular dependencies
@@ -487,7 +560,7 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
    */
   const extractAndLinkEntities = async (
     memoryId: string,
-    content: string
+    content: string,
   ): Promise<void> => {
     const DEBUG = process.env.SWARM_DEBUG === "1" || process.env.DEBUG === "1";
     const log = (msg: string, data?: unknown) => {
@@ -504,13 +577,12 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
         extractEntitiesAndRelationships,
         storeEntities,
         storeRelationships,
-        linkMemoryToEntities
+        linkMemoryToEntities,
       } = await import("./entity-extraction.js");
 
-      const {
-        extractTaxonomy,
-        storeTaxonomy
-      } = await import("./taxonomy-extraction.js");
+      const { extractTaxonomy, storeTaxonomy } = await import(
+        "./taxonomy-extraction.js"
+      );
 
       // Get raw libSQL client for entity-extraction functions
       const client = db.run(sql`SELECT 1`); // Access underlying client
@@ -530,7 +602,9 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
       const model = getOllamaExtractionModel(config.ollamaHost);
       log("Model configured:", { host: config.ollamaHost });
 
-      log("Calling extractEntitiesAndRelationships (this may take a moment)...");
+      log(
+        "Calling extractEntitiesAndRelationships (this may take a moment)...",
+      );
       const extraction = await extractEntitiesAndRelationships(content, {
         languageModel: model,
       });
@@ -545,7 +619,10 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
         return;
       }
 
-      log("Entities found:", extraction.entities.map(e => `${e.name} (${e.entityType})`));
+      log(
+        "Entities found:",
+        extraction.entities.map((e) => `${e.name} (${e.entityType})`),
+      );
 
       // Store entities (with deduplication)
       log("Storing entities to database...");
@@ -554,21 +631,26 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
           name: e.name,
           entityType: e.entityType,
         })),
-        libsqlClient
+        libsqlClient,
       );
-      log(`Stored ${storedEntities.length} entities:`, storedEntities.map(e => e.id));
+      log(
+        `Stored ${storedEntities.length} entities:`,
+        storedEntities.map((e) => e.id),
+      );
 
       // Link memory to extracted entities via junction table
       log("Linking memory to entities...");
       await linkMemoryToEntities(
         memoryId,
         storedEntities.map((e) => e.id),
-        libsqlClient
+        libsqlClient,
       );
       log("Memory linked to entities");
 
       // Build entity ID lookup map (name -> id)
-      const entityIdMap = new Map(storedEntities.map((e) => [e.name.toLowerCase(), e.id]));
+      const entityIdMap = new Map(
+        storedEntities.map((e) => [e.name.toLowerCase(), e.id]),
+      );
 
       // Store relationships (need to resolve names to IDs first)
       log("Processing relationships...");
@@ -579,7 +661,9 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
 
           if (!subjectId || !objectId) {
             // Skip relationships where entities weren't extracted
-            log(`Skipping relationship: ${rel.subjectName} -> ${rel.objectName} (missing entity)`);
+            log(
+              `Skipping relationship: ${rel.subjectName} -> ${rel.objectName} (missing entity)`,
+            );
             return null;
           }
 
@@ -600,26 +684,44 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
 
       // Extract and store SKOS taxonomy relationships
       try {
-        log(`[Taxonomy] Extracting relationships for ${storedEntities.length} entities`);
-        console.log(`[Taxonomy] Extracting relationships for ${storedEntities.length} entities`);
+        log(
+          `[Taxonomy] Extracting relationships for ${storedEntities.length} entities`,
+        );
+        console.log(
+          `[Taxonomy] Extracting relationships for ${storedEntities.length} entities`,
+        );
 
         const { getOllamaExtractionModel } = await import("./ollama-llm.js");
-        const taxonomyResult = await extractTaxonomy(content, extraction.entities, {
-          languageModel: getOllamaExtractionModel(config.ollamaHost),
-        });
+        const taxonomyResult = await extractTaxonomy(
+          content,
+          extraction.entities,
+          {
+            languageModel: getOllamaExtractionModel(config.ollamaHost),
+          },
+        );
 
         if (taxonomyResult.relationships.length > 0) {
-          console.log(`[Taxonomy] Found ${taxonomyResult.relationships.length} relationships, storing...`);
+          console.log(
+            `[Taxonomy] Found ${taxonomyResult.relationships.length} relationships, storing...`,
+          );
 
-          const stored = await storeTaxonomy(taxonomyResult.relationships, libsqlClient);
+          const stored = await storeTaxonomy(
+            taxonomyResult.relationships,
+            libsqlClient,
+          );
 
-          console.log(`[Taxonomy] Stored ${stored.length} taxonomy relationships`);
+          console.log(
+            `[Taxonomy] Stored ${stored.length} taxonomy relationships`,
+          );
         } else {
           console.log(`[Taxonomy] No taxonomy relationships found`);
         }
       } catch (taxonomyError) {
         // Graceful degradation: taxonomy extraction is optional, don't block memory storage
-        console.warn("[Taxonomy] Extraction failed, continuing without taxonomy:", taxonomyError);
+        console.warn(
+          "[Taxonomy] Extraction failed, continuing without taxonomy:",
+          taxonomyError,
+        );
       }
     } catch (error) {
       // Graceful degradation: log error but don't throw (keeps store() working)
@@ -638,12 +740,16 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
      */
     async store(
       information: string,
-      options: StoreOptions = {}
-    ): Promise<{ id: string; autoTags?: AutoTagResult; links?: Array<{ memory_id: string; link_type: LinkType }> }> {
-      const { 
-        collection = "default", 
-        tags, 
-        metadata: metadataJson, 
+      options: StoreOptions = {},
+    ): Promise<{
+      id: string;
+      autoTags?: AutoTagResult;
+      links?: Array<{ memory_id: string; link_type: LinkType }>;
+    }> {
+      const {
+        collection = "default",
+        tags,
+        metadata: metadataJson,
         confidence,
         autoTag,
         autoLink,
@@ -670,12 +776,13 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
       const embedding = await generateEmbedding(information);
       if (!embedding) {
         throw new Error(
-          "Failed to generate embedding. Ensure Ollama is running and model is available."
+          "Failed to generate embedding. Ensure Ollama is running and model is available.",
         );
       }
 
-      // Store memory with clamped confidence
+      // Store memory with clamped confidence and resolved scope
       const id = generateId();
+      const resolvedScope = await resolveScope(options.scope);
       const memory: Memory = {
         id,
         content: information,
@@ -683,13 +790,17 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
         collection,
         createdAt: new Date(),
         confidence: clampConfidence(confidence),
+        repoKey: resolvedScope.repoKey,
+        packageKey: resolvedScope.packageKey,
       };
 
       await store.store(memory, embedding);
 
       // Optional auto-features (gracefully degrade on failure)
       let autoTagsResult: AutoTagResult | undefined;
-      let linksResult: Array<{ memory_id: string; link_type: LinkType }> | undefined;
+      let linksResult:
+        | Array<{ memory_id: string; link_type: LinkType }>
+        | undefined;
 
       if (autoTag) {
         autoTagsResult = await autoGenerateTags(information, parsedTags);
@@ -708,12 +819,15 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
           // Create memory_links entries using Drizzle ORM
           for (const link of linksResult) {
             const linkId = `link-${randomBytes(8).toString("hex")}`;
-            await db.insert(memoryLinks).values({
-              id: linkId,
-              source_id: id,
-              target_id: link.memory_id,
-              link_type: link.link_type,
-            }).onConflictDoNothing();
+            await db
+              .insert(memoryLinks)
+              .values({
+                id: linkId,
+                source_id: id,
+                target_id: link.memory_id,
+                link_type: link.link_type,
+              })
+              .onConflictDoNothing();
           }
         }
       }
@@ -732,7 +846,10 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
      * @param options - Search options
      * @returns Search results with scores
      */
-    async find(query: string, options: FindOptions = {}): Promise<SearchResult[]> {
+    async find(
+      query: string,
+      options: FindOptions = {},
+    ): Promise<SearchResult[]> {
       const {
         limit = 10,
         collection,
@@ -745,8 +862,15 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
 
       let results: SearchResult[];
 
+      // Scope filtering is opt-in: omitting `options.scope` searches
+      // unscoped (matches pre-scoping behavior exactly).
+      const scope =
+        options.scope !== undefined
+          ? await resolveScope(options.scope)
+          : undefined;
+
       // Common search options for both vector and FTS
-      const searchOpts = { limit, collection, trackAccess, decayTier };
+      const searchOpts = { limit, collection, trackAccess, decayTier, scope };
 
       if (fts) {
         // Use full-text search (explicit user choice - no warning needed)
@@ -758,7 +882,7 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
           // Graceful degradation: Ollama unavailable, fallback to FTS
           console.warn(
             "⚠️  Ollama unavailable - falling back to FTS (full-text search). " +
-            "Semantic search disabled. To restore vector search, ensure Ollama is running."
+              "Semantic search disabled. To restore vector search, ensure Ollama is running.",
           );
           results = await store.ftsSearch(query, searchOpts);
         } else {
@@ -863,7 +987,7 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
       });
 
       const result = await Effect.runPromise(
-        program.pipe(Effect.provide(ollamaLayer), Effect.either)
+        program.pipe(Effect.provide(ollamaLayer), Effect.either),
       );
 
       if (result._tag === "Left") {
@@ -888,14 +1012,22 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
      */
     async upsert(
       information: string,
-      options: StoreOptions = {}
-    ): Promise<{ id: string; operation: "ADD" | "UPDATE" | "DELETE" | "NOOP"; reason: string }> {
+      options: StoreOptions = {},
+    ): Promise<{
+      id: string;
+      operation: "ADD" | "UPDATE" | "DELETE" | "NOOP";
+      reason: string;
+    }> {
       const { useSmartOps = false } = options;
 
       // Without smart ops, default to simple ADD behavior
       if (!useSmartOps) {
         const result = await this.store(information, options);
-        return { id: result.id, operation: "ADD", reason: "Smart operations disabled" };
+        return {
+          id: result.id,
+          operation: "ADD",
+          reason: "Smart operations disabled",
+        };
       }
 
       // Search for similar memories
@@ -903,10 +1035,17 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
       if (!embedding) {
         // Fallback to ADD if embedding unavailable
         const result = await this.store(information, options);
-        return { id: result.id, operation: "ADD", reason: "Embedding unavailable, defaulting to ADD" };
+        return {
+          id: result.id,
+          operation: "ADD",
+          reason: "Embedding unavailable, defaulting to ADD",
+        };
       }
 
-      const similar = await store.search(embedding, { limit: 5, threshold: 0.6 });
+      const similar = await store.search(embedding, {
+        limit: 5,
+        threshold: 0.6,
+      });
 
       // Analyze what operation to perform
       const decision = await analyzeSmartOperation(information, similar);
@@ -954,7 +1093,11 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
             })
             .where(eq(memories.id, decision.targetId));
 
-          return { id: decision.targetId, operation: "UPDATE", reason: decision.reason };
+          return {
+            id: decision.targetId,
+            operation: "UPDATE",
+            reason: decision.reason,
+          };
         }
 
         case "DELETE": {
@@ -963,7 +1106,11 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
           }
 
           await this.remove(decision.targetId);
-          return { id: decision.targetId, operation: "DELETE", reason: decision.reason };
+          return {
+            id: decision.targetId,
+            operation: "DELETE",
+            reason: decision.reason,
+          };
         }
 
         case "NOOP": {
@@ -990,7 +1137,7 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
     async findValidAt(
       query: string,
       timestamp: Date,
-      options: FindOptions = {}
+      options: FindOptions = {},
     ): Promise<SearchResult[]> {
       const { limit = 10, collection } = options;
 
@@ -1003,7 +1150,9 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
 
       // Raw SQL query with temporal filter
       const isoTimestamp = timestamp.toISOString();
-      const collectionFilter = collection ? sql`AND collection = ${collection}` : sql``;
+      const collectionFilter = collection
+        ? sql`AND collection = ${collection}`
+        : sql``;
 
       const rows = await db.all<any>(sql`
         SELECT *,
@@ -1018,7 +1167,9 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
 
       const results: SearchResult[] = rows.map((row: any) => {
         const metadata =
-          typeof row.metadata === "string" ? JSON.parse(row.metadata) : row.metadata ?? {};
+          typeof row.metadata === "string"
+            ? JSON.parse(row.metadata)
+            : (row.metadata ?? {});
 
         // Parse created_at, handling null/undefined/invalid dates
         let createdAt: Date;
@@ -1123,9 +1274,13 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
      */
     async getLinkedMemories(
       memoryId: string,
-      linkType?: LinkType
-    ): Promise<Array<{ memory: Memory; link: { link_type: string; strength?: number } }>> {
-      const linkTypeFilter = linkType ? sql`AND ml.link_type = ${linkType}` : sql``;
+      linkType?: LinkType,
+    ): Promise<
+      Array<{ memory: Memory; link: { link_type: string; strength?: number } }>
+    > {
+      const linkTypeFilter = linkType
+        ? sql`AND ml.link_type = ${linkType}`
+        : sql``;
 
       const rows = await db.all<any>(sql`
         SELECT m.*, ml.link_type, ml.strength
@@ -1138,7 +1293,9 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
 
       return rows.map((row: any) => {
         const metadata =
-          typeof row.metadata === "string" ? JSON.parse(row.metadata) : row.metadata ?? {};
+          typeof row.metadata === "string"
+            ? JSON.parse(row.metadata)
+            : (row.metadata ?? {});
 
         // Parse created_at, handling null/undefined/invalid dates
         let createdAt: Date;
@@ -1180,9 +1337,11 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
      */
     async findByEntity(
       entityName: string,
-      entityType?: EntityType
+      entityType?: EntityType,
     ): Promise<SearchResult[]> {
-      const typeFilter = entityType ? sql`AND e.entity_type = ${entityType}` : sql``;
+      const typeFilter = entityType
+        ? sql`AND e.entity_type = ${entityType}`
+        : sql``;
 
       const rows = await db.all<any>(sql`
         SELECT DISTINCT m.*
@@ -1196,7 +1355,9 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
 
       return rows.map((row: any) => {
         const metadata =
-          typeof row.metadata === "string" ? JSON.parse(row.metadata) : row.metadata ?? {};
+          typeof row.metadata === "string"
+            ? JSON.parse(row.metadata)
+            : (row.metadata ?? {});
 
         // Parse created_at, handling null/undefined/invalid dates
         let createdAt: Date;
@@ -1233,9 +1394,14 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
      * @param memoryId - Memory ID
      * @returns Entities and relationships in the knowledge graph
      */
-    async getKnowledgeGraph(
-      memoryId: string
-    ): Promise<{ entities: Array<{ id: string; name: string; entity_type: string }>; relationships: Array<{ subject_id: string; predicate: string; object_id: string }> }> {
+    async getKnowledgeGraph(memoryId: string): Promise<{
+      entities: Array<{ id: string; name: string; entity_type: string }>;
+      relationships: Array<{
+        subject_id: string;
+        predicate: string;
+        object_id: string;
+      }>;
+    }> {
       // Get entities linked to this memory
       const entitiesRows = await db.all<any>(sql`
         SELECT e.id, e.name, e.entity_type
@@ -1252,8 +1418,14 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
           ? await db.all<any>(sql`
               SELECT r.subject_id, r.predicate, r.object_id
               FROM relationships r
-              WHERE r.subject_id IN (${sql.join(entityIds.map(id => sql`${id}`), sql`, `)})
-                OR r.object_id IN (${sql.join(entityIds.map(id => sql`${id}`), sql`, `)})
+              WHERE r.subject_id IN (${sql.join(
+                entityIds.map((id) => sql`${id}`),
+                sql`, `,
+              )})
+                OR r.object_id IN (${sql.join(
+                  entityIds.map((id) => sql`${id}`),
+                  sql`, `,
+                )})
             `)
           : [];
 

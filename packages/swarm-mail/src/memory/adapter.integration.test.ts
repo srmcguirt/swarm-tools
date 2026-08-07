@@ -46,7 +46,9 @@ async function createTestDb(): Promise<{ client: Client; db: SwarmDb }> {
       access_count TEXT DEFAULT '0',
       last_accessed TEXT DEFAULT (datetime('now')),
       category TEXT,
-      status TEXT DEFAULT 'active'
+      status TEXT DEFAULT 'active',
+      repo_key TEXT,
+      package_key TEXT
     )
   `);
 
