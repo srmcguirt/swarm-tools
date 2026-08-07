@@ -70,6 +70,7 @@ import {
 } from "./planning-guardrails";
 import { checkCoordinatorGuard } from "./coordinator-guard";
 import { createCompactionHook } from "./compaction-hook";
+import { runConfigBootstrap } from "./config-bootstrap";
 
 /**
  * OpenCode Swarm Plugin
@@ -90,9 +91,7 @@ import { createCompactionHook } from "./compaction-hook";
  * @param input - Plugin context from OpenCode
  * @returns Plugin hooks including tools, events, and tool execution hooks
  */
-const SwarmPlugin: Plugin = async (
-  input: PluginInput,
-): Promise<Hooks> => {
+const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
   const { $, directory, client } = input;
 
   // Set the working directory for hive commands
@@ -111,6 +110,18 @@ const SwarmPlugin: Plugin = async (
   // Set the project directory for Swarm Mail (embedded event-sourced)
   // This ensures swarmmail_init uses the correct project path by default
   setSwarmMailProjectDirectory(directory);
+
+  // Bootstrap this project's opencode.json to point at its hive-data
+  // mirror, unless it already has its own AGENTS.md/CLAUDE.md/MEMORY.md.
+  // Untracked and non-destructive - see config-bootstrap.ts. Non-fatal:
+  // a bootstrap failure must never block plugin init.
+  try {
+    await runConfigBootstrap(directory);
+  } catch (error) {
+    console.warn(
+      `[swarm-plugin] config bootstrap failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 
   /** Track active sessions for cleanup */
   let activeAgentMailState: AgentMailState | null = null;
@@ -157,20 +168,20 @@ const SwarmPlugin: Plugin = async (
   }
 
   return {
-     /**
-      * Register all tools from modules
-      *
-      * Tools are namespaced by module:
-      * - hive:create, hive:query, hive:update, etc. (primary)
-      * - beads:* - Legacy aliases (deprecated, use hive:* instead)
-      * - agent-mail:init, agent-mail:send, agent-mail:reserve, etc. (legacy MCP)
-      * - swarm-mail:init, swarm-mail:send, swarm-mail:reserve, etc. (embedded)
-	  * - repo-crawl:readme, repo-crawl:structure, etc.
-	  * - mandate:file, mandate:vote, mandate:query, etc.
-	  * - hivemind:* - Unified memory system (learnings + sessions)
-	  * - contributor_lookup - GitHub contributor profile lookup with changeset credits
-	 */
-     tool: {
+    /**
+     * Register all tools from modules
+     *
+     * Tools are namespaced by module:
+     * - hive:create, hive:query, hive:update, etc. (primary)
+     * - beads:* - Legacy aliases (deprecated, use hive:* instead)
+     * - agent-mail:init, agent-mail:send, agent-mail:reserve, etc. (legacy MCP)
+     * - swarm-mail:init, swarm-mail:send, swarm-mail:reserve, etc. (embedded)
+     * - repo-crawl:readme, repo-crawl:structure, etc.
+     * - mandate:file, mandate:vote, mandate:query, etc.
+     * - hivemind:* - Unified memory system (learnings + sessions)
+     * - contributor_lookup - GitHub contributor profile lookup with changeset credits
+     */
+    tool: {
       ...hiveTools,
       ...swarmMailTools,
       ...structuredTools,
@@ -232,7 +243,10 @@ const SwarmPlugin: Plugin = async (
 
       // Detect coordinator by Task tool spawning swarm-worker agent
       const taskArgs = output.args as { subagent_type?: string } | undefined;
-      if (toolName === "task" && taskArgs?.subagent_type?.toLowerCase().includes("swarm")) {
+      if (
+        toolName === "task" &&
+        taskArgs?.subagent_type?.toLowerCase().includes("swarm")
+      ) {
         setCoordinatorContext({
           isCoordinator: true,
           sessionId,
@@ -243,7 +257,7 @@ const SwarmPlugin: Plugin = async (
       // Uses session-scoped context detection
       if (isInCoordinatorContext(sessionId)) {
         const ctx = getCoordinatorContext(sessionId);
-        
+
         // ENFORCE coordinator guard (blocks violations)
         const guardResult = checkCoordinatorGuard({
           agentContext: "coordinator",
@@ -350,7 +364,11 @@ const SwarmPlugin: Plugin = async (
 
       // Clear coordinator context when epic is closed
       const sessionId = input.sessionID || "unknown";
-      if (toolName === "hive_close" && output.output && isInCoordinatorContext(sessionId)) {
+      if (
+        toolName === "hive_close" &&
+        output.output &&
+        isInCoordinatorContext(sessionId)
+      ) {
         const ctx = getCoordinatorContext(sessionId);
         try {
           // Check if the closed cell is the active epic
@@ -381,8 +399,14 @@ const SwarmPlugin: Plugin = async (
         try {
           const result = output.output ? JSON.parse(output.output) : {};
           // Check if this was a researcher task by looking at the result
-          if (result.researcher_id || result.research_topic || result.tools_used) {
-            const { captureResearcherSpawned } = await import("./eval-capture.js");
+          if (
+            result.researcher_id ||
+            result.research_topic ||
+            result.tools_used
+          ) {
+            const { captureResearcherSpawned } = await import(
+              "./eval-capture.js"
+            );
             await captureResearcherSpawned({
               session_id: input.sessionID,
               epic_id: epicId,
@@ -442,7 +466,9 @@ const SwarmPlugin: Plugin = async (
 
           // captureBlockerResolved - status changed FROM blocked
           if (previousStatus === "blocked" && newStatus !== "blocked") {
-            const { captureBlockerResolved } = await import("./eval-capture.js");
+            const { captureBlockerResolved } = await import(
+              "./eval-capture.js"
+            );
             await captureBlockerResolved({
               session_id: input.sessionID,
               epic_id: epicId,
@@ -455,14 +481,19 @@ const SwarmPlugin: Plugin = async (
 
           // captureBlockerDetected - status changed TO blocked
           if (newStatus === "blocked" && previousStatus !== "blocked") {
-            const { captureBlockerDetected } = await import("./eval-capture.js");
+            const { captureBlockerDetected } = await import(
+              "./eval-capture.js"
+            );
             await captureBlockerDetected({
               session_id: input.sessionID,
               epic_id: epicId,
               worker_id: result.worker_id || "unknown",
               subtask_id: result.id || "unknown",
               blocker_type: result.blocker_type || "unknown",
-              blocker_description: result.blocker_description || result.description || "No description provided",
+              blocker_description:
+                result.blocker_description ||
+                result.description ||
+                "No description provided",
             });
           }
         } catch (err) {
@@ -476,10 +507,16 @@ const SwarmPlugin: Plugin = async (
         try {
           const result = output.output ? JSON.parse(output.output) : {};
           // Check if this was a scope change message by looking at the result
-          if (result.scope_change || result.original_scope || result.new_scope) {
-            const { captureScopeChangeDecision } = await import("./eval-capture.js");
+          if (
+            result.scope_change ||
+            result.original_scope ||
+            result.new_scope
+          ) {
+            const { captureScopeChangeDecision } = await import(
+              "./eval-capture.js"
+            );
             const threadId = result.thread_id || epicId;
-            
+
             await captureScopeChangeDecision({
               session_id: input.sessionID,
               epic_id: threadId,
@@ -915,8 +952,8 @@ export {
  * };
  * ```
  */
-export { 
-  SWARM_COMPACTION_CONTEXT, 
+export {
+  SWARM_COMPACTION_CONTEXT,
   createCompactionHook,
   scanSessionMessages,
   type ScannedSwarmState,
