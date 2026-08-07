@@ -1,0 +1,7 @@
+# Bun configuration for swarm-mail
+# See: https://bun.sh/docs/runtime/bunfig
+
+[test]
+# Force SWARM_DB_PATH to a temp DB before any test file loads.
+# See test-preload.ts and the RUNTIME GUARD in src/streams/index.ts.
+preload = ["./test-preload.ts"]
