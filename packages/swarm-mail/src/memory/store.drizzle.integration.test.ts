@@ -17,6 +17,7 @@ import {
 import { sql } from "drizzle-orm";
 import type { SwarmDb } from "../db/client.js";
 import { createDrizzleClient } from "../db/drizzle.js";
+import { memories } from "../db/schema/memory.js";
 import {
   createInMemorySwarmMailLibSQL,
   toSwarmDb,
@@ -491,5 +492,110 @@ describe("Memory Store (Drizzle) - Status Corruption Regression", () => {
 
     const results = await store.ftsSearch("unique-fts-marker-legacy");
     expect(results.map((r) => r.memory.id)).toContain("mem-legacy-fts");
+  });
+});
+
+describe("Memory Store (Drizzle) - Default Value Corruption Regression", () => {
+  // Regression tests for the same class of bug fixed for `status` in
+  // db/schema/memory.ts: Drizzle's SQLite dialect binds `.default()` as a
+  // client-side insert parameter whenever a column is omitted from
+  // `.values()`, independent of the raw SQL DDL default. Two distinct
+  // corruption patterns existed:
+  //
+  // Class A (metadata, collection, tags): the JS default string itself
+  // contained literal single-quote characters (e.g. `"'{}'"` instead of
+  // `"{}"`), so the quotes got written into the column as data.
+  //
+  // Class B (created_at, updated_at, last_accessed): the default was a raw
+  // SQL expression string (`"(datetime('now'))"`) not wrapped in Drizzle's
+  // `sql` tag, so it was bound as a literal 20-character string rather than
+  // evaluated as an expression - the timestamp columns held the text
+  // "(datetime('now'))" instead of an actual datetime.
+  //
+  // store() explicitly sets metadata/collection/created_at, so those never
+  // hit the bug in current usage (dead but still worth fixing - a trap for
+  // the next column omission). tags/updated_at/last_accessed are omitted by
+  // store() on every call, so those corrupt every row in production.
+  let swarmMail: SwarmMailAdapter;
+  let db: SwarmDb;
+  let store: ReturnType<typeof createMemoryStore>;
+
+  beforeAll(async () => {
+    swarmMail = await createInMemorySwarmMailLibSQL(
+      "default-value-corruption-regression",
+    );
+    const dbAdapter = await swarmMail.getDatabase();
+    db = toSwarmDb(dbAdapter);
+    store = createMemoryStore(db);
+  });
+
+  afterAll(async () => {
+    await swarmMail.close();
+  });
+
+  test("store() writes clean tags/updated_at/last_accessed defaults (columns store() omits on every call)", async () => {
+    const memory: Memory = {
+      id: "mem-default-live",
+      content: "Some content",
+      metadata: {},
+      collection: "default",
+      createdAt: new Date(),
+    };
+
+    await store.store(memory, mockEmbedding(1));
+
+    const rows = await db.all<{
+      tags: string;
+      updated_at: string;
+      last_accessed: string;
+    }>(
+      sql`SELECT tags, updated_at, last_accessed FROM memories WHERE id = ${memory.id}`,
+    );
+
+    expect(rows[0]?.tags).toBe("[]");
+    expect(rows[0]?.tags).not.toContain("'");
+
+    expect(rows[0]?.updated_at).not.toBe("(datetime('now'))");
+    expect(new Date(rows[0]!.updated_at).toString()).not.toBe("Invalid Date");
+
+    expect(rows[0]?.last_accessed).not.toBe("(datetime('now'))");
+    expect(new Date(rows[0]!.last_accessed).toString()).not.toBe(
+      "Invalid Date",
+    );
+  });
+
+  test("a direct Drizzle insert omitting all defaulted columns writes clean values, not quoted literals or raw SQL text", async () => {
+    // Bypasses store() (which sets metadata/collection/created_at explicitly)
+    // to exercise every defaulted column's client-side binding directly -
+    // this is what a raw `db.insert(memories).values({id, content})` call
+    // (e.g. from a migration or future call site) would actually produce.
+    await db.insert(memories).values({
+      id: "mem-default-raw-insert",
+      content: "Raw insert content",
+    });
+
+    const rows = await db.all<{
+      metadata: string;
+      collection: string;
+      tags: string;
+      created_at: string;
+      updated_at: string;
+      last_accessed: string;
+    }>(
+      sql`SELECT metadata, collection, tags, created_at, updated_at, last_accessed FROM memories WHERE id = ${"mem-default-raw-insert"}`,
+    );
+    const row = rows[0]!;
+
+    // Class A: no literal quote characters leaking into the stored value.
+    expect(row.metadata).toBe("{}");
+    expect(row.collection).toBe("default");
+    expect(row.tags).toBe("[]");
+
+    // Class B: a real, parseable datetime - not the raw SQL text.
+    for (const col of ["created_at", "updated_at", "last_accessed"] as const) {
+      const value = row[col];
+      expect(value).not.toBe("(datetime('now'))");
+      expect(new Date(value).toString()).not.toBe("Invalid Date");
+    }
   });
 });

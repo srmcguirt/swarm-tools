@@ -12,6 +12,7 @@
  * @module db/schema/memory
  */
 
+import { sql } from "drizzle-orm";
 import { customType, real, sqliteTable, text, uniqueIndex, primaryKey } from "drizzle-orm/sqlite-core";
 import { EMBEDDING_DIM } from "../../memory/ollama.js";
 
@@ -64,11 +65,11 @@ const vector = (dimension: number) =>
 export const memories = sqliteTable("memories", {
   id: text("id").primaryKey(),
   content: text("content").notNull(),
-  metadata: text("metadata").default("'{}'"),
-  collection: text("collection").default("'default'"),
-  tags: text("tags").default("'[]'"),
-  created_at: text("created_at").default("(datetime('now'))"),
-  updated_at: text("updated_at").default("(datetime('now'))"),
+  metadata: text("metadata").default("{}"),
+  collection: text("collection").default("default"),
+  tags: text("tags").default("[]"),
+  created_at: text("created_at").default(sql`(datetime('now'))`),
+  updated_at: text("updated_at").default(sql`(datetime('now'))`),
   decay_factor: real("decay_factor").default(1.0),
   embedding: vector(EMBEDDING_DIM)("embedding"),
   // Temporal validity
@@ -80,7 +81,7 @@ export const memories = sqliteTable("memories", {
   keywords: text("keywords"),
   // Access tracking for decay tiers (hot/warm/cold)
   access_count: text("access_count").default("0"), // INTEGER stored as TEXT for SQLite compat
-  last_accessed: text("last_accessed").default("(datetime('now'))"),
+  last_accessed: text("last_accessed").default(sql`(datetime('now'))`),
   // Fact categorization
   category: text("category"), // relationship, milestone, status, preference, context
   status: text("status").default("active"), // active, superseded
