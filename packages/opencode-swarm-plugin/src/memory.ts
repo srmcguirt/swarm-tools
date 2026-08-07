@@ -321,14 +321,6 @@ export async function createMemoryAdapter(
 			.filter(Boolean);
 	};
 
-	/**
-	 * Truncate content for preview
-	 */
-	const truncateContent = (content: string, maxLength = 200): string => {
-		if (content.length <= maxLength) return content;
-		return `${content.substring(0, maxLength)}...`;
-	};
-
 	return {
 		/**
 		 * Store a memory with embedding and optional auto-features
@@ -370,6 +362,12 @@ export async function createMemoryAdapter(
 		/**
 		 * Find memories by semantic similarity or full-text search
 		 *
+		 * Delegates to the real swarm-mail adapter so reads get the same
+		 * repo/package/global scope filtering as store()/upsert() (package ∪
+		 * repo ∪ global, resolved from cwd). Previously this bypassed the
+		 * real adapter and called the legacy unscoped store directly, which
+		 * let one repo's memories leak into another repo's search results.
+		 *
 		 * When Ollama is unavailable, automatically falls back to FTS.
 		 */
 		async find(args: FindArgs): Promise<FindResult> {
@@ -380,52 +378,27 @@ export async function createMemoryAdapter(
 
 			const limit = args.limit ?? 10;
 
-			let results: SearchResult[];
-			let usedFallback = false;
+			const results: SearchResult[] = await realAdapter.find(args.query, {
+				limit,
+				collection: args.collection,
+				expand: args.expand,
+				fts: args.fts,
+				scope: "auto",
+			});
 
-			if (args.fts) {
-				// Full-text search (explicit)
-				results = await store.ftsSearch(args.query, {
-					limit,
-					collection: args.collection,
-				});
-			} else {
-				// Vector search - generate query embedding
-				const program = Effect.gen(function* () {
-					const ollama = yield* Ollama;
-					return yield* ollama.embed(args.query);
-				});
-
-				try {
-					const queryEmbedding = await Effect.runPromise(
-						program.pipe(Effect.provide(ollamaLayer)),
-					);
-
-					results = await store.search(queryEmbedding, {
-						limit,
-						threshold: 0.3,
-						collection: args.collection,
-					});
-				} catch (e) {
-					// Ollama unavailable - fallback to FTS
-					// This happens when Ollama isn't running or can't be reached
-					console.warn(
-						"[hivemind] Ollama unavailable, falling back to full-text search",
-					);
-					usedFallback = true;
-					results = await store.ftsSearch(args.query, {
-						limit,
-						collection: args.collection,
-					});
-				}
-			}
+			// realAdapter transparently falls back to FTS when Ollama can't
+			// produce an embedding for a vector search. Surface that so
+			// callers know results are FTS-based even though they didn't
+			// explicitly request fts.
+			const usedFallback =
+				!args.fts &&
+				results.length > 0 &&
+				results.every((r) => r.matchType === "fts");
 
 			const response: FindResult & { fallback_used?: boolean } = {
 				results: results.map((r) => ({
 					id: r.memory.id,
-					content: args.expand
-						? r.memory.content
-						: truncateContent(r.memory.content),
+					content: r.memory.content,
 					score: r.score,
 					collection: r.memory.collection,
 					metadata: r.memory.metadata,

@@ -24,7 +24,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createTestLibSQLDb } from "../test-libsql.js";
+import { createClient, type Client } from "@libsql/client";
+import {
+  createTestLibSQLDb,
+  createTestDatabaseAdapter,
+} from "../test-libsql.js";
 import type { DatabaseAdapter } from "../types/database.js";
 import {
   parseMemoryJSONL,
@@ -32,6 +36,7 @@ import {
   type MemoryExport,
 } from "./sync.js";
 import { syncProjectMemoriesToHiveData } from "./hive-data-sync.js";
+import { createLibSQLMemorySchema } from "./libsql-schema.js";
 
 async function insertMemory(
   db: DatabaseAdapter,
@@ -71,6 +76,7 @@ describe("syncProjectMemoriesToHiveData", () => {
     const result = await syncProjectMemoriesToHiveData(db, {
       globalMemoriesPath: globalPath,
       projectMemoriesPath: projectPath,
+      repoKey: "proj",
     });
 
     expect(result.projectExported).toBe(1);
@@ -94,6 +100,7 @@ describe("syncProjectMemoriesToHiveData", () => {
     const result = await syncProjectMemoriesToHiveData(db, {
       globalMemoriesPath: globalPath,
       projectMemoriesPath: projectPath,
+      repoKey: "proj",
     });
 
     expect(result.projectExported).toBe(1);
@@ -117,6 +124,7 @@ describe("syncProjectMemoriesToHiveData", () => {
     await syncProjectMemoriesToHiveData(db, {
       globalMemoriesPath: globalPath,
       projectMemoriesPath: projectPath,
+      repoKey: "proj",
     });
 
     const afterGlobal = readFileSync(globalPath, "utf-8");
@@ -141,6 +149,7 @@ describe("syncProjectMemoriesToHiveData", () => {
     const result = await syncProjectMemoriesToHiveData(db, {
       globalMemoriesPath: globalPath,
       projectMemoriesPath: projectPath,
+      repoKey: "proj",
     });
 
     expect(result.projectExported).toBe(1);
@@ -169,6 +178,7 @@ describe("syncProjectMemoriesToHiveData", () => {
     const result = await syncProjectMemoriesToHiveData(db, {
       globalMemoriesPath: globalPath,
       projectMemoriesPath: projectPath,
+      repoKey: "proj",
     });
 
     expect(result.imported.created).toBe(2);
@@ -188,12 +198,14 @@ describe("syncProjectMemoriesToHiveData", () => {
     const first = await syncProjectMemoriesToHiveData(db, {
       globalMemoriesPath: globalPath,
       projectMemoriesPath: projectPath,
+      repoKey: "proj",
     });
     const contentAfterFirst = readFileSync(projectPath, "utf-8");
 
     const second = await syncProjectMemoriesToHiveData(db, {
       globalMemoriesPath: globalPath,
       projectMemoriesPath: projectPath,
+      repoKey: "proj",
     });
     const contentAfterSecond = readFileSync(projectPath, "utf-8");
 
@@ -210,6 +222,7 @@ describe("syncProjectMemoriesToHiveData", () => {
     const result = await syncProjectMemoriesToHiveData(db, {
       globalMemoriesPath: globalPath,
       projectMemoriesPath: projectPath,
+      repoKey: "proj",
     });
 
     expect(result.projectExported).toBe(0);
@@ -225,6 +238,7 @@ describe("syncProjectMemoriesToHiveData", () => {
     await syncProjectMemoriesToHiveData(db, {
       globalMemoriesPath: globalPath,
       projectMemoriesPath: projectPath,
+      repoKey: "proj",
     });
 
     const content = readFileSync(projectPath, "utf-8");
@@ -248,6 +262,7 @@ describe("syncProjectMemoriesToHiveData", () => {
     await syncProjectMemoriesToHiveData(db, {
       globalMemoriesPath: globalPath,
       projectMemoriesPath: projectPath,
+      repoKey: "proj",
     });
 
     const dbCount = (await db.query<{ id: string }>("SELECT id FROM memories"))
@@ -261,5 +276,84 @@ describe("syncProjectMemoriesToHiveData", () => {
 
     expect(dbCount).toBe(3);
     expect(globalCount + projectCount).toBe(3);
+  });
+});
+
+describe("syncProjectMemoriesToHiveData - repo-scoped export (scope columns present)", () => {
+  let client: Client;
+  let db: DatabaseAdapter;
+  let testDir: string;
+  let globalPath: string;
+  let projectAPath: string;
+  let projectBPath: string;
+
+  beforeEach(async () => {
+    client = createClient({ url: ":memory:" });
+    await createLibSQLMemorySchema(client);
+    db = createTestDatabaseAdapter(client);
+
+    testDir = mkdtempSync(join(tmpdir(), "hive-data-memory-sync-scoped-"));
+    mkdirSync(join(testDir, "global"), { recursive: true });
+    mkdirSync(join(testDir, "repos", "proj-a"), { recursive: true });
+    mkdirSync(join(testDir, "repos", "proj-b"), { recursive: true });
+    globalPath = join(testDir, "global", "memories.jsonl");
+    projectAPath = join(testDir, "repos", "proj-a", "memories.jsonl");
+    projectBPath = join(testDir, "repos", "proj-b", "memories.jsonl");
+  });
+
+  afterEach(() => {
+    client.close();
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  async function insertScopedMemory(
+    id: string,
+    content: string,
+    repoKey: string | null,
+  ): Promise<void> {
+    await db.query(
+      `INSERT INTO memories (id, content, metadata, collection, created_at, repo_key, package_key)
+       VALUES ($1, $2, $3, $4, $5, $6, NULL)`,
+      [id, content, "{}", "default", new Date().toISOString(), repoKey],
+    );
+  }
+
+  test("each project's export contains only its own repo-scoped memories", async () => {
+    await insertScopedMemory("mem-a1", "Project A learning", "repo-a");
+    await insertScopedMemory("mem-b1", "Project B learning", "repo-b");
+
+    const resultA = await syncProjectMemoriesToHiveData(db, {
+      globalMemoriesPath: globalPath,
+      projectMemoriesPath: projectAPath,
+      repoKey: "repo-a",
+    });
+    const resultB = await syncProjectMemoriesToHiveData(db, {
+      globalMemoriesPath: globalPath,
+      projectMemoriesPath: projectBPath,
+      repoKey: "repo-b",
+    });
+
+    expect(resultA.projectExported).toBe(1);
+    const writtenA = parseMemoryJSONL(readFileSync(projectAPath, "utf-8"));
+    expect(writtenA.map((m) => m.id)).toEqual(["mem-a1"]);
+
+    expect(resultB.projectExported).toBe(1);
+    const writtenB = parseMemoryJSONL(readFileSync(projectBPath, "utf-8"));
+    expect(writtenB.map((m) => m.id)).toEqual(["mem-b1"]);
+  });
+
+  test("global memories (null repo_key) are excluded from every project export", async () => {
+    await insertScopedMemory("mem-global", "Cross-project learning", null);
+    await insertScopedMemory("mem-a1", "Project A learning", "repo-a");
+
+    const resultA = await syncProjectMemoriesToHiveData(db, {
+      globalMemoriesPath: globalPath,
+      projectMemoriesPath: projectAPath,
+      repoKey: "repo-a",
+    });
+
+    expect(resultA.projectExported).toBe(1);
+    const writtenA = parseMemoryJSONL(readFileSync(projectAPath, "utf-8"));
+    expect(writtenA.map((m) => m.id)).toEqual(["mem-a1"]);
   });
 });

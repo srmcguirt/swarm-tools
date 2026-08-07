@@ -1745,10 +1745,10 @@ export const hive_sync = tool({
     }
     const syncDirRelative = relative(hiveDataRoot, syncDir);
 
-    // 2b. Sync memories into hive-data's global/project split. The DB has
-    // no scope column yet — see syncProjectMemoriesToHiveData's doc for
-    // the interim rule (new memories default to project-scoped; the
-    // global file is never written by this sync).
+    // 2b. Sync memories into hive-data's global/project split. See
+    // syncProjectMemoriesToHiveData's doc: exports are restricted to this
+    // project's repo_key (falling back to the pre-scoping heuristic on
+    // older DBs); the global file is never written by this sync.
     const swarmMail = await getSwarmMailLibSQL(projectKey);
     const db = await swarmMail.getDatabase();
     const globalMemoriesPath = join(hiveDataRoot, "global", "memories.jsonl");
@@ -1758,6 +1758,7 @@ export const hive_sync = tool({
       const memoryResult = await syncProjectMemoriesToHiveData(db, {
         globalMemoriesPath,
         projectMemoriesPath,
+        repoKey: slug,
       });
       memoriesSynced = memoryResult.projectExported;
     } catch (err) {
