@@ -1117,3 +1117,141 @@ describe("swarm-insights data layer", () => {
 		});
 	});
 });
+
+// ============================================================================
+// MCP Tool Wrappers (Bug 2: these tools were documented in the agent prompt
+// but never registered in allTools, so `swarm tool <name>` returned
+// "Unknown tool". The insight-computation functions above are the real,
+// tested substrate - these tests prove the tool wrappers actually call them.
+// ============================================================================
+
+describe("insight tool wrappers", () => {
+	test("swarm_get_strategy_insights and swarm_get_file_insights and swarm_get_pattern_insights are registered", async () => {
+		const {
+			swarm_get_strategy_insights,
+			swarm_get_file_insights,
+			swarm_get_pattern_insights,
+			insightsTools,
+		} = await import("./swarm-insights");
+
+		expect(swarm_get_strategy_insights).toBeDefined();
+		expect(swarm_get_file_insights).toBeDefined();
+		expect(swarm_get_pattern_insights).toBeDefined();
+		expect(insightsTools).toEqual({
+			swarm_get_strategy_insights,
+			swarm_get_file_insights,
+			swarm_get_pattern_insights,
+		});
+	});
+
+	describe("execution against the event store", () => {
+		const mockContext = {
+			sessionID: `test-insights-tools-${Date.now()}`,
+			messageID: `test-message-${Date.now()}`,
+			agent: "test-agent",
+			abort: new AbortController().signal,
+		};
+
+		let testProjectPath: string;
+
+		beforeAll(async () => {
+			const { getSwarmMailLibSQL } = await import("swarm-mail");
+			const { setHiveWorkingDirectory } = await import("./hive");
+
+			testProjectPath = `/tmp/test-insights-tools-${Date.now()}`;
+			setHiveWorkingDirectory(testProjectPath);
+
+			const swarmMail = await getSwarmMailLibSQL(testProjectPath);
+			const db = await swarmMail.getDatabase();
+			const now = Date.now();
+
+			await db.query(
+				`INSERT INTO events (type, project_key, timestamp, data) VALUES
+				('subtask_outcome', ?, ?, ?),
+				('subtask_outcome', ?, ?, ?),
+				('subtask_outcome', ?, ?, ?)`,
+				[
+					testProjectPath,
+					now,
+					JSON.stringify({ strategy: "tool-wrapper-strategy", success: "true" }),
+					testProjectPath,
+					now,
+					JSON.stringify({
+						files_touched: ["src/tool-wrapper-file.ts"],
+						success: "false",
+						error_count: 1,
+					}),
+					testProjectPath,
+					now,
+					JSON.stringify({
+						success: "false",
+						error_type: "tool_wrapper_error",
+					}),
+				],
+			);
+			await db.query(
+				`INSERT INTO events (type, project_key, timestamp, data) VALUES
+				('subtask_outcome', ?, ?, ?)`,
+				[
+					testProjectPath,
+					now,
+					JSON.stringify({
+						success: "false",
+						error_type: "tool_wrapper_error",
+					}),
+				],
+			);
+		});
+
+		test("swarm_get_strategy_insights returns strategy success rates", async () => {
+			const { swarm_get_strategy_insights } = await import("./swarm-insights");
+
+			const result = await swarm_get_strategy_insights.execute(
+				{ task: "any task" },
+				mockContext,
+			);
+			const parsed = JSON.parse(result);
+
+			expect(parsed.success).toBe(true);
+			expect(Array.isArray(parsed.insights)).toBe(true);
+			expect(
+				parsed.insights.some(
+					(i: { strategy: string }) => i.strategy === "tool-wrapper-strategy",
+				),
+			).toBe(true);
+		});
+
+		test("swarm_get_file_insights returns file-specific gotchas", async () => {
+			const { swarm_get_file_insights } = await import("./swarm-insights");
+
+			const result = await swarm_get_file_insights.execute(
+				{ files: ["src/tool-wrapper-file.ts"] },
+				mockContext,
+			);
+			const parsed = JSON.parse(result);
+
+			expect(parsed.success).toBe(true);
+			expect(Array.isArray(parsed.insights)).toBe(true);
+			expect(
+				parsed.insights.some(
+					(i: { file: string }) => i.file === "src/tool-wrapper-file.ts",
+				),
+			).toBe(true);
+		});
+
+		test("swarm_get_pattern_insights returns recurring failure patterns", async () => {
+			const { swarm_get_pattern_insights } = await import("./swarm-insights");
+
+			const result = await swarm_get_pattern_insights.execute({}, mockContext);
+			const parsed = JSON.parse(result);
+
+			expect(parsed.success).toBe(true);
+			expect(Array.isArray(parsed.patterns)).toBe(true);
+			expect(
+				parsed.patterns.some(
+					(p: { pattern: string }) => p.pattern === "tool_wrapper_error",
+				),
+			).toBe(true);
+		});
+	});
+});

@@ -10,7 +10,9 @@
  * - Anti-pattern registry
  */
 
-import type { SwarmMailAdapter } from "swarm-mail";
+import { tool } from "@opencode-ai/plugin";
+import { getSwarmMailLibSQL, type SwarmMailAdapter } from "swarm-mail";
+import { getHiveWorkingDirectory } from "./hive.js";
 import { getMemoryAdapter } from "./memory-tools.js";
 
 // ============================================================================
@@ -1234,3 +1236,113 @@ export function formatFileHistoryWarnings(
 
 	return result;
 }
+
+// ============================================================================
+// MCP Tools
+// ============================================================================
+//
+// These wrap the data-layer functions above as directly callable tools.
+// They take no project_key - like other ambient tools in this plugin, they
+// resolve the current project via getHiveWorkingDirectory() (set by the
+// plugin/CLI at startup, falling back to process.cwd()).
+
+/**
+ * Get strategy success rates for decomposition planning.
+ *
+ * Use during planning to see which decomposition strategies (file-based,
+ * feature-based, risk-based) have historically succeeded or failed.
+ */
+export const swarm_get_strategy_insights = tool({
+	description:
+		"Get strategy success rates for decomposition planning. Use this when planning task decomposition to see which strategies (file-based, feature-based, risk-based) have historically succeeded or failed. Returns success rates and recommendations based on past swarm outcomes.",
+	args: {
+		task: tool.schema
+			.string()
+			.describe("Task description to analyze for strategy recommendation"),
+	},
+	async execute(args) {
+		try {
+			const swarmMail = await getSwarmMailLibSQL(getHiveWorkingDirectory());
+			const insights = await getStrategyInsights(swarmMail, args.task);
+			return JSON.stringify({ success: true, insights }, null, 2);
+		} catch (error) {
+			return JSON.stringify(
+				{
+					success: false,
+					error: error instanceof Error ? error.message : String(error),
+				},
+				null,
+				2,
+			);
+		}
+	},
+});
+
+/**
+ * Get file-specific gotchas for worker context.
+ *
+ * Use when assigning files to workers to warn them about historical failure
+ * patterns for those files.
+ */
+export const swarm_get_file_insights = tool({
+	description:
+		"Get file-specific gotchas for worker context. Use this when assigning files to workers to warn them about historical failure patterns. Queries past outcomes and semantic memory for file-specific learnings (edge cases, common bugs, performance traps).",
+	args: {
+		files: tool.schema
+			.array(tool.schema.string())
+			.describe("File paths to get insights for"),
+	},
+	async execute(args) {
+		try {
+			const swarmMail = await getSwarmMailLibSQL(getHiveWorkingDirectory());
+			const insights = await getFileInsights(swarmMail, args.files);
+			return JSON.stringify({ success: true, insights }, null, 2);
+		} catch (error) {
+			return JSON.stringify(
+				{
+					success: false,
+					error: error instanceof Error ? error.message : String(error),
+				},
+				null,
+				2,
+			);
+		}
+	},
+});
+
+/**
+ * Get common failure patterns across swarms.
+ *
+ * Use during planning or when debugging stuck swarms to see recurring
+ * anti-patterns (type errors, timeouts, conflicts, test failures).
+ */
+export const swarm_get_pattern_insights = tool({
+	description:
+		"Get common failure patterns across swarms. Use this during planning or when debugging stuck swarms to see recurring anti-patterns (type errors, timeouts, conflicts, test failures). Returns top 5 most frequent failure patterns with recommendations.",
+	args: {},
+	async execute() {
+		try {
+			const swarmMail = await getSwarmMailLibSQL(getHiveWorkingDirectory());
+			const patterns = await getPatternInsights(swarmMail);
+			return JSON.stringify({ success: true, patterns }, null, 2);
+		} catch (error) {
+			return JSON.stringify(
+				{
+					success: false,
+					error: error instanceof Error ? error.message : String(error),
+				},
+				null,
+				2,
+			);
+		}
+	},
+});
+
+/**
+ * Combined insights tools for plugin/CLI registration.
+ */
+export const insightsTools = {
+	swarm_get_strategy_insights,
+	swarm_get_file_insights,
+	swarm_get_pattern_insights,
+};
