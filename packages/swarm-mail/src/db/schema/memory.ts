@@ -132,7 +132,7 @@ export const memoryLinks = sqliteTable(
       .references(() => memories.id, { onDelete: "cascade" }),
     link_type: text("link_type").notNull(), // 'related', 'contradicts', 'supersedes', 'elaborates'
     strength: real("strength").default(1.0),
-    created_at: text("created_at").default("(datetime('now'))"),
+    created_at: text("created_at").default(sql`(datetime('now'))`),
   },
   (table) => [
     uniqueIndex("unique_link").on(
@@ -167,9 +167,9 @@ export const entities = sqliteTable(
     entity_type: text("entity_type").notNull(),
     canonical_name: text("canonical_name"),
     pref_label: text("pref_label"),
-    alt_labels: text("alt_labels").default("'[]'"),
-    created_at: text("created_at").default("(datetime('now'))"),
-    updated_at: text("updated_at").default("(datetime('now'))"),
+    alt_labels: text("alt_labels").default("[]"),
+    created_at: text("created_at").default(sql`(datetime('now'))`),
+    updated_at: text("updated_at").default(sql`(datetime('now'))`),
   },
   (table) => [uniqueIndex("unique_entity").on(table.name, table.entity_type)],
 );
@@ -198,7 +198,7 @@ export const entityTaxonomy = sqliteTable(
       .notNull()
       .references(() => entities.id, { onDelete: "cascade" }),
     relationship_type: text("relationship_type").notNull(), // 'broader', 'narrower', 'related'
-    created_at: text("created_at").default("(datetime('now'))"),
+    created_at: text("created_at").default(sql`(datetime('now'))`),
   },
   (table) => [
     uniqueIndex("unique_taxonomy_link").on(
@@ -238,7 +238,7 @@ export const relationships = sqliteTable(
       onDelete: "set null",
     }),
     confidence: real("confidence").default(1.0),
-    created_at: text("created_at").default("(datetime('now'))"),
+    created_at: text("created_at").default(sql`(datetime('now'))`),
   },
   (table) => [
     uniqueIndex("unique_relationship").on(
