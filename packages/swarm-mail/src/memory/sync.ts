@@ -111,7 +111,7 @@ export function parseMemoryJSONL(jsonl: string): MemoryExport[] {
       memories.push(memory);
     } catch (err) {
       throw new Error(
-        `Invalid JSON in JSONL: ${err instanceof Error ? err.message : String(err)}`
+        `Invalid JSON in JSONL: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
@@ -131,7 +131,7 @@ export function parseMemoryJSONL(jsonl: string): MemoryExport[] {
  */
 export async function exportMemories(
   db: DatabaseAdapter,
-  options: ExportOptions = {}
+  options: ExportOptions = {},
 ): Promise<string> {
   // Build query
   const conditions: string[] = [];
@@ -143,7 +143,8 @@ export async function exportMemories(
     params.push(options.collection);
   }
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const whereClause =
+    conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
   const query = `
     SELECT id, content, metadata, collection, created_at
@@ -182,10 +183,13 @@ export async function exportMemories(
     }
 
     // Extract tags as comma-separated string
-    const tags = Array.isArray(metadata.tags) ? metadata.tags.join(",") : undefined;
+    const tags = Array.isArray(metadata.tags)
+      ? metadata.tags.join(",")
+      : undefined;
 
     // Extract confidence
-    const confidence = typeof metadata.confidence === "number" ? metadata.confidence : undefined;
+    const confidence =
+      typeof metadata.confidence === "number" ? metadata.confidence : undefined;
 
     // Build metadata string (excluding tags and confidence which are top-level)
     const metadataWithoutSpecial = { ...metadata };
@@ -226,7 +230,7 @@ export async function exportMemories(
 export async function importMemories(
   db: DatabaseAdapter,
   jsonl: string,
-  options: ImportOptions = {}
+  options: ImportOptions = {},
 ): Promise<MemoryImportResult> {
   const { skipExisting = true } = options;
 
@@ -258,25 +262,48 @@ async function importSingleMemory(
   db: DatabaseAdapter,
   memoryExport: MemoryExport,
   skipExisting: boolean,
-  result: MemoryImportResult
+  result: MemoryImportResult,
 ): Promise<void> {
   // Validate ID
   if (!memoryExport.id || memoryExport.id.trim() === "") {
     throw new Error("Memory ID is required");
   }
 
-  // Check if exists
-  const existingResult = await db.query<{ id: string }>(
+  // Check if exists by ID
+  const existingById = await db.query<{ id: string }>(
     "SELECT id FROM memories WHERE id = $1",
-    [memoryExport.id]
+    [memoryExport.id],
   );
 
-  if (existingResult.rows.length > 0) {
+  if (existingById.rows.length > 0) {
     if (skipExisting) {
       result.skipped++;
       return;
     }
     // If not skipping, we could update - but for now just skip
+    result.skipped++;
+    return;
+  }
+
+  // Check if exists by content, independent of ID.
+  //
+  // `hivemind_store` mints a fresh random id on every call (see
+  // adapter.ts generateId()). If memories are ever rehydrated from a
+  // backup/JSONL after a DB wipe, the recovered rows get brand-new ids
+  // even though their content is identical to what's already recorded
+  // in memories.jsonl. Without this check, a later sync reads the JSONL
+  // (holding the old ids), finds no id match against the new ids, and
+  // re-inserts every row as a duplicate — making sync non-idempotent.
+  //
+  // Import never deletes or overwrites an existing row, so this can't
+  // clobber an embedding-bearing copy already in the DB: at worst we
+  // decline to insert a row whose content already exists.
+  const existingByContent = await db.query<{ id: string }>(
+    "SELECT id FROM memories WHERE content = $1",
+    [memoryExport.information],
+  );
+
+  if (existingByContent.rows.length > 0) {
     result.skipped++;
     return;
   }
@@ -315,7 +342,7 @@ async function importSingleMemory(
       JSON.stringify(metadata),
       "default", // Default collection for imported memories
       memoryExport.created_at,
-    ]
+    ],
   );
 
   result.created++;
@@ -337,7 +364,7 @@ async function importSingleMemory(
  */
 export async function syncMemories(
   db: DatabaseAdapter,
-  hivePath: string
+  hivePath: string,
 ): Promise<{ imported: MemoryImportResult; exported: number }> {
   const memoriesPath = join(hivePath, "memories.jsonl");
 
@@ -354,7 +381,9 @@ export async function syncMemories(
   writeFileSync(memoriesPath, exportContent);
 
   // Count exported
-  const exportedCount = exportContent ? exportContent.split("\n").filter(Boolean).length : 0;
+  const exportedCount = exportContent
+    ? exportContent.split("\n").filter(Boolean).length
+    : 0;
 
   return {
     imported: importResult,
