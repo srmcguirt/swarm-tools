@@ -79,10 +79,7 @@ import {
   canUseWorktreeIsolation,
   getStartCommit,
 } from "./swarm-worktree";
-import {
-  isReviewApproved,
-  getReviewStatus,
-} from "./swarm-review";
+import { getReviewStatus } from "./swarm-review";
 import { getGitCommitInfo } from "./utils/git-commit-info";
 import { captureCoordinatorEvent, type EvalRecord } from "./eval-capture.js";
 import { formatResearcherPrompt } from "./swarm-prompts";
@@ -1061,7 +1058,10 @@ export const swarm_complete = tool({
 
     // Check review gate (unless skipped) - BEFORE try block so errors are clear
     if (!args.skip_review) {
-      const reviewStatusResult = getReviewStatus(args.bead_id);
+      const reviewStatusResult = await getReviewStatus(
+        args.project_key,
+        args.bead_id
+      );
 
       if (!reviewStatusResult.approved) {
         // Check if review was even attempted

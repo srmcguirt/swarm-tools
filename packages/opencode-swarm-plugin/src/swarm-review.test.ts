@@ -11,16 +11,24 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   generateReviewPrompt,
   ReviewResultSchema,
-  markReviewApproved,
   isReviewApproved,
   getReviewStatus,
-  clearReviewStatus,
   swarm_review,
   swarm_review_feedback,
   type ReviewPromptContext,
   type ReviewResult,
   type ReviewIssue,
 } from "./swarm-review";
+
+// Review state is event-sourced (durable, no in-memory cache/clear). Each
+// test that needs an isolated attempt/approval count uses its own unique
+// task_id within a shared project_key, rather than relying on a "clear"
+// between tests - there is no clear, by design (see swarm-review.ts).
+let uniqueIdCounter = 0;
+function uniqueTaskId(prefix: string): string {
+  uniqueIdCounter += 1;
+  return `${prefix}-${Date.now()}-${uniqueIdCounter}`;
+}
 
 // NOTE: Do NOT use vi.mock() or mock.module() for swarm-mail here.
 // Both leak globally in bun's test runner and break swarm-mail.integration.test.ts.
@@ -226,38 +234,67 @@ describe("ReviewResultSchema", () => {
 // ============================================================================
 
 describe("Review status tracking", () => {
-  beforeEach(() => {
-    clearReviewStatus("test-task-1");
-    clearReviewStatus("test-task-2");
-  });
+  const projectKey = "/tmp/review-status-test";
 
-  it("starts with no review status", () => {
-    const status = getReviewStatus("test-task-1");
+  it("starts with no review status", async () => {
+    const taskId = uniqueTaskId("review-status");
+    const status = await getReviewStatus(projectKey, taskId);
     expect(status.reviewed).toBe(false);
     expect(status.approved).toBe(false);
     expect(status.attempt_count).toBe(0);
     expect(status.remaining_attempts).toBe(3);
   });
 
-  it("marks task as approved", () => {
-    markReviewApproved("test-task-1");
-    expect(isReviewApproved("test-task-1")).toBe(true);
-    const status = getReviewStatus("test-task-1");
+  it("marks task as approved", async () => {
+    const taskId = uniqueTaskId("review-status-approved");
+    await swarm_review_feedback.execute(
+      {
+        project_key: projectKey,
+        task_id: taskId,
+        worker_id: "worker-test",
+        status: "approved",
+        summary: "Looks good",
+      },
+      mockContext
+    );
+    expect(await isReviewApproved(projectKey, taskId)).toBe(true);
+    const status = await getReviewStatus(projectKey, taskId);
     expect(status.reviewed).toBe(true);
     expect(status.approved).toBe(true);
   });
 
-  it("tracks separate status per task", () => {
-    markReviewApproved("test-task-1");
-    expect(isReviewApproved("test-task-1")).toBe(true);
-    expect(isReviewApproved("test-task-2")).toBe(false);
+  it("tracks separate status per task", async () => {
+    const taskId1 = uniqueTaskId("review-status-t1");
+    const taskId2 = uniqueTaskId("review-status-t2");
+    await swarm_review_feedback.execute(
+      {
+        project_key: projectKey,
+        task_id: taskId1,
+        worker_id: "worker-test",
+        status: "approved",
+      },
+      mockContext
+    );
+    expect(await isReviewApproved(projectKey, taskId1)).toBe(true);
+    expect(await isReviewApproved(projectKey, taskId2)).toBe(false);
   });
 
-  it("clears review status", () => {
-    markReviewApproved("test-task-1");
-    expect(isReviewApproved("test-task-1")).toBe(true);
-    clearReviewStatus("test-task-1");
-    expect(isReviewApproved("test-task-1")).toBe(false);
+  it("approval is a terminal state - stays approved on repeated reads", async () => {
+    // Event-sourced state is append-only: there is no "clear" operation.
+    // Approving ends the review sequence, and repeated reads keep
+    // reporting approved=true since nothing can un-append the event.
+    const taskId = uniqueTaskId("review-status-terminal");
+    await swarm_review_feedback.execute(
+      {
+        project_key: projectKey,
+        task_id: taskId,
+        worker_id: "worker-test",
+        status: "approved",
+      },
+      mockContext
+    );
+    expect(await isReviewApproved(projectKey, taskId)).toBe(true);
+    expect(await isReviewApproved(projectKey, taskId)).toBe(true);
   });
 });
 
@@ -293,12 +330,12 @@ describe("swarm_review", () => {
   });
 
   it("includes remaining attempts in context", async () => {
-    clearReviewStatus("bd-test-123.1");
+    const taskId = uniqueTaskId("bd-review-remaining");
     const result = await swarm_review.execute(
       {
         project_key: "/tmp",
         epic_id: "bd-test-123",
-        task_id: "bd-test-123.1",
+        task_id: taskId,
       },
       mockContext
     );
@@ -314,7 +351,6 @@ describe("swarm_review", () => {
 
 describe("swarm_review_feedback", () => {
   beforeEach(() => {
-    clearReviewStatus("bd-feedback-test");
     vi.clearAllMocks();
   });
 
@@ -324,10 +360,11 @@ describe("swarm_review_feedback", () => {
   });
 
   it("sends approved feedback successfully", async () => {
+    const taskId = uniqueTaskId("bd-feedback-approved");
     const result = await swarm_review_feedback.execute(
       {
         project_key: "/tmp/test-project",
-        task_id: "bd-feedback-test",
+        task_id: taskId,
         worker_id: "worker-test",
         status: "approved",
         summary: "Looks good, clean implementation",
@@ -341,6 +378,7 @@ describe("swarm_review_feedback", () => {
   });
 
   it("sends needs_changes feedback with structured issues", async () => {
+    const taskId = uniqueTaskId("bd-feedback-needs-changes");
     const issues: ReviewIssue[] = [
       {
         file: "src/auth.ts",
@@ -353,7 +391,7 @@ describe("swarm_review_feedback", () => {
     const result = await swarm_review_feedback.execute(
       {
         project_key: "/tmp/test-project",
-        task_id: "bd-feedback-test",
+        task_id: taskId,
         worker_id: "worker-test",
         status: "needs_changes",
         issues: JSON.stringify(issues),
@@ -368,10 +406,11 @@ describe("swarm_review_feedback", () => {
   });
 
   it("requires issues for needs_changes status", async () => {
+    const taskId = uniqueTaskId("bd-feedback-missing-issues");
     const result = await swarm_review_feedback.execute(
       {
         project_key: "/tmp/test-project",
-        task_id: "bd-feedback-test",
+        task_id: taskId,
         worker_id: "worker-test",
         status: "needs_changes",
         // no issues provided
@@ -385,13 +424,14 @@ describe("swarm_review_feedback", () => {
   });
 
   it("tracks review attempts (max 3)", async () => {
+    const taskId = uniqueTaskId("bd-feedback-tracks-attempts");
     const issues = JSON.stringify([{ file: "x.ts", issue: "bug" }]);
 
     // First attempt
     let result = await swarm_review_feedback.execute(
       {
         project_key: "/tmp/test-project",
-        task_id: "bd-feedback-test",
+        task_id: taskId,
         worker_id: "worker-test",
         status: "needs_changes",
         issues,
@@ -406,7 +446,7 @@ describe("swarm_review_feedback", () => {
     result = await swarm_review_feedback.execute(
       {
         project_key: "/tmp/test-project",
-        task_id: "bd-feedback-test",
+        task_id: taskId,
         worker_id: "worker-test",
         status: "needs_changes",
         issues,
@@ -419,6 +459,7 @@ describe("swarm_review_feedback", () => {
   });
 
   it("fails task after 3 rejected reviews", async () => {
+    const taskId = uniqueTaskId("bd-feedback-fails-after-3");
     const issues = JSON.stringify([{ file: "x.ts", issue: "still broken" }]);
 
     // Exhaust all attempts
@@ -426,7 +467,7 @@ describe("swarm_review_feedback", () => {
       await swarm_review_feedback.execute(
         {
           project_key: "/tmp/test-project",
-          task_id: "bd-feedback-test",
+          task_id: taskId,
           worker_id: "worker-test",
           status: "needs_changes",
           issues,
@@ -436,18 +477,24 @@ describe("swarm_review_feedback", () => {
     }
 
     // Check final state
-    const status = getReviewStatus("bd-feedback-test");
+    const status = await getReviewStatus("/tmp/test-project", taskId);
     expect(status.remaining_attempts).toBe(0);
   });
 
-  it("clears attempts on approval", async () => {
+  it("approval ends the sequence but does not erase rejection history", async () => {
+    // Decision: approving is a terminal state, not a reset. The event log
+    // is append-only, so a prior needs_changes event still counts toward
+    // attempt_count after approval - but approved=true is what actually
+    // gates swarm_complete, so the historical count no longer matters for
+    // gating purposes.
+    const taskId = uniqueTaskId("bd-feedback-approve-after-reject");
     const issues = JSON.stringify([{ file: "x.ts", issue: "bug" }]);
 
-    // Add some attempts
+    // Add an attempt
     await swarm_review_feedback.execute(
       {
         project_key: "/tmp/test-project",
-        task_id: "bd-feedback-test",
+        task_id: taskId,
         worker_id: "worker-test",
         status: "needs_changes",
         issues,
@@ -459,7 +506,7 @@ describe("swarm_review_feedback", () => {
     await swarm_review_feedback.execute(
       {
         project_key: "/tmp/test-project",
-        task_id: "bd-feedback-test",
+        task_id: taskId,
         worker_id: "worker-test",
         status: "approved",
         summary: "Fixed!",
@@ -467,17 +514,18 @@ describe("swarm_review_feedback", () => {
       mockContext
     );
 
-    // Attempts should be cleared
-    const status = getReviewStatus("bd-feedback-test");
-    expect(status.attempt_count).toBe(0);
-    expect(status.remaining_attempts).toBe(3);
+    const status = await getReviewStatus("/tmp/test-project", taskId);
+    expect(status.approved).toBe(true);
+    expect(status.attempt_count).toBe(1);
+    expect(status.remaining_attempts).toBe(2);
   });
 
   it("handles invalid issues JSON", async () => {
+    const taskId = uniqueTaskId("bd-feedback-invalid-json");
     const result = await swarm_review_feedback.execute(
       {
         project_key: "/tmp/test-project",
-        task_id: "bd-feedback-test",
+        task_id: taskId,
         worker_id: "worker-test",
         status: "needs_changes",
         issues: "not valid json",
@@ -492,10 +540,11 @@ describe("swarm_review_feedback", () => {
 
   it("extracts epic ID from task ID for thread", async () => {
     // Task ID format: bd-epic.subtask
+    const taskId = `bd-epic-${Date.now()}.4`;
     const result = await swarm_review_feedback.execute(
       {
         project_key: "/tmp/test-project",
-        task_id: "bd-epic-123.4",
+        task_id: taskId,
         worker_id: "worker-test",
         status: "approved",
       },
@@ -504,7 +553,7 @@ describe("swarm_review_feedback", () => {
 
     const parsed = JSON.parse(result);
     expect(parsed.success).toBe(true);
-    // The sendSwarmMessage mock was called with threadId = "bd-epic-123"
+    // The sendSwarmMessage mock was called with threadId = the epic portion
   });
 });
 
@@ -513,25 +562,32 @@ describe("swarm_review_feedback", () => {
 // ============================================================================
 
 describe("swarm_complete with review gate", () => {
-  // These tests verify the review gate behavior that was added to swarm_complete
+  // These tests verify the review status functions that gate completion
   // The actual swarm_complete tests are in swarm.integration.test.ts
-  // Here we test the review status functions that gate completion
+  const projectKey = "/tmp/gate-test";
 
-  beforeEach(() => {
-    clearReviewStatus("bd-gate-test");
+  it("isReviewApproved returns false for unreviewed task", async () => {
+    const taskId = uniqueTaskId("bd-gate-unreviewed");
+    expect(await isReviewApproved(projectKey, taskId)).toBe(false);
   });
 
-  it("isReviewApproved returns false for unreviewed task", () => {
-    expect(isReviewApproved("bd-gate-test")).toBe(false);
+  it("isReviewApproved returns true after approval", async () => {
+    const taskId = uniqueTaskId("bd-gate-approved");
+    await swarm_review_feedback.execute(
+      {
+        project_key: projectKey,
+        task_id: taskId,
+        worker_id: "worker",
+        status: "approved",
+      },
+      mockContext
+    );
+    expect(await isReviewApproved(projectKey, taskId)).toBe(true);
   });
 
-  it("isReviewApproved returns true after markReviewApproved", () => {
-    markReviewApproved("bd-gate-test");
-    expect(isReviewApproved("bd-gate-test")).toBe(true);
-  });
-
-  it("getReviewStatus provides complete status info", () => {
-    const status = getReviewStatus("bd-gate-test");
+  it("getReviewStatus provides complete status info", async () => {
+    const taskId = uniqueTaskId("bd-gate-fresh");
+    const status = await getReviewStatus(projectKey, taskId);
     expect(status).toEqual({
       reviewed: false,
       approved: false,
@@ -540,13 +596,16 @@ describe("swarm_complete with review gate", () => {
     });
   });
 
-  it("approval clears attempt count", async () => {
-    // Simulate some failed attempts
+  it("approval ends the sequence without erasing rejection history", async () => {
+    // Decision: approval is a terminal state, not a reset - the event log
+    // is append-only. attempt_count reflects the historical rejection
+    // count; approved=true is what actually gates swarm_complete.
+    const taskId = uniqueTaskId("bd-gate-approve-after-reject");
     const issues = JSON.stringify([{ file: "x.ts", issue: "bug" }]);
     await swarm_review_feedback.execute(
       {
-        project_key: "/tmp/test",
-        task_id: "bd-gate-test",
+        project_key: projectKey,
+        task_id: taskId,
         worker_id: "worker",
         status: "needs_changes",
         issues,
@@ -554,22 +613,23 @@ describe("swarm_complete with review gate", () => {
       mockContext
     );
 
-    let status = getReviewStatus("bd-gate-test");
+    let status = await getReviewStatus(projectKey, taskId);
     expect(status.attempt_count).toBe(1);
+    expect(status.approved).toBe(false);
 
     // Approve
     await swarm_review_feedback.execute(
       {
-        project_key: "/tmp/test",
-        task_id: "bd-gate-test",
+        project_key: projectKey,
+        task_id: taskId,
         worker_id: "worker",
         status: "approved",
       },
       mockContext
     );
 
-    status = getReviewStatus("bd-gate-test");
-    expect(status.attempt_count).toBe(0);
+    status = await getReviewStatus(projectKey, taskId);
+    expect(status.attempt_count).toBe(1);
     expect(status.approved).toBe(true);
   });
 });
@@ -707,11 +767,11 @@ describe("edge cases", () => {
 
 describe("swarm_review_feedback retry_context", () => {
   beforeEach(() => {
-    clearReviewStatus("bd-retry-test");
     vi.clearAllMocks();
   });
 
   it("returns retry_context when status is needs_changes", async () => {
+    const taskId = uniqueTaskId("bd-retry-basic");
     const issues = JSON.stringify([
       { file: "src/auth.ts", line: 42, issue: "Missing null check", suggestion: "Add null check" }
     ]);
@@ -719,7 +779,7 @@ describe("swarm_review_feedback retry_context", () => {
     const result = await swarm_review_feedback.execute(
       {
         project_key: "/tmp/test-project",
-        task_id: "bd-retry-test",
+        task_id: taskId,
         worker_id: "worker-test",
         status: "needs_changes",
         issues,
@@ -732,13 +792,14 @@ describe("swarm_review_feedback retry_context", () => {
     expect(parsed.status).toBe("needs_changes");
     // NEW: Should include retry_context for coordinator
     expect(parsed).toHaveProperty("retry_context");
-    expect(parsed.retry_context).toHaveProperty("task_id", "bd-retry-test");
+    expect(parsed.retry_context).toHaveProperty("task_id", taskId);
     expect(parsed.retry_context).toHaveProperty("attempt", 1);
     expect(parsed.retry_context).toHaveProperty("issues");
     expect(parsed.retry_context.issues).toHaveLength(1);
   });
 
   it("retry_context includes issues in structured format", async () => {
+    const taskId = uniqueTaskId("bd-retry-issues-format");
     const issues = [
       { file: "src/a.ts", line: 10, issue: "Bug A", suggestion: "Fix A" },
       { file: "src/b.ts", line: 20, issue: "Bug B", suggestion: "Fix B" },
@@ -747,7 +808,7 @@ describe("swarm_review_feedback retry_context", () => {
     const result = await swarm_review_feedback.execute(
       {
         project_key: "/tmp/test-project",
-        task_id: "bd-retry-test",
+        task_id: taskId,
         worker_id: "worker-test",
         status: "needs_changes",
         issues: JSON.stringify(issues),
@@ -760,12 +821,13 @@ describe("swarm_review_feedback retry_context", () => {
   });
 
   it("retry_context includes next_action hint for coordinator", async () => {
+    const taskId = uniqueTaskId("bd-retry-next-action");
     const issues = JSON.stringify([{ file: "x.ts", issue: "bug" }]);
 
     const result = await swarm_review_feedback.execute(
       {
         project_key: "/tmp/test-project",
-        task_id: "bd-retry-test",
+        task_id: taskId,
         worker_id: "worker-test",
         status: "needs_changes",
         issues,
@@ -780,10 +842,11 @@ describe("swarm_review_feedback retry_context", () => {
   });
 
   it("does NOT include retry_context when approved", async () => {
+    const taskId = uniqueTaskId("bd-retry-approved");
     const result = await swarm_review_feedback.execute(
       {
         project_key: "/tmp/test-project",
-        task_id: "bd-retry-test",
+        task_id: taskId,
         worker_id: "worker-test",
         status: "approved",
         summary: "Looks good!",
@@ -798,6 +861,7 @@ describe("swarm_review_feedback retry_context", () => {
   });
 
   it("does NOT include retry_context when task fails (3 attempts)", async () => {
+    const taskId = uniqueTaskId("bd-retry-fails-3");
     const issues = JSON.stringify([{ file: "x.ts", issue: "still broken" }]);
 
     // Exhaust all attempts
@@ -806,7 +870,7 @@ describe("swarm_review_feedback retry_context", () => {
       result = await swarm_review_feedback.execute(
         {
           project_key: "/tmp/test-project",
-          task_id: "bd-retry-test",
+          task_id: taskId,
           worker_id: "worker-test",
           status: "needs_changes",
           issues,
@@ -822,12 +886,13 @@ describe("swarm_review_feedback retry_context", () => {
   });
 
   it("retry_context includes max_attempts for coordinator awareness", async () => {
+    const taskId = uniqueTaskId("bd-retry-max-attempts");
     const issues = JSON.stringify([{ file: "x.ts", issue: "bug" }]);
 
     const result = await swarm_review_feedback.execute(
       {
         project_key: "/tmp/test-project",
-        task_id: "bd-retry-test",
+        task_id: taskId,
         worker_id: "worker-test",
         status: "needs_changes",
         issues,
@@ -840,13 +905,14 @@ describe("swarm_review_feedback retry_context", () => {
   });
 
   it("handles needs_changes without crashing (dead worker scenario)", async () => {
+    const taskId = uniqueTaskId("bd-retry-dead-worker");
     const issues = JSON.stringify([{ file: "x.ts", issue: "bug" }]);
 
     // needs_changes should succeed even though worker is dead (can't read messages)
     const result = await swarm_review_feedback.execute(
       {
         project_key: "/tmp/test-project",
-        task_id: "bd-retry-test",
+        task_id: taskId,
         worker_id: "worker-test",
         status: "needs_changes",
         issues,
@@ -860,10 +926,11 @@ describe("swarm_review_feedback retry_context", () => {
   });
 
   it("handles approved status (audit trail)", async () => {
+    const taskId = uniqueTaskId("bd-retry-audit-trail");
     const result = await swarm_review_feedback.execute(
       {
         project_key: "/tmp/test-project",
-        task_id: "bd-retry-test",
+        task_id: taskId,
         worker_id: "worker-test",
         status: "approved",
         summary: "Good work!",

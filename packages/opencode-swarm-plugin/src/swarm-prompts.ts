@@ -2014,12 +2014,12 @@ export const swarm_spawn_researcher = tool({
  */
 export const swarm_spawn_retry = tool({
   description:
-    "Generate retry prompt for a worker that failed review. Includes issues from previous attempt, diff if provided, and standard worker contract.",
+    "Generate retry prompt for a worker that failed review. Includes issues from previous attempt, diff if provided, and standard worker contract. When project_path is provided, the attempt number is derived server-side from the durable review event log (the caller-supplied `attempt` is ignored for enforcement) - a coordinator can't defeat the 3-strike guard by always passing attempt: 1.",
   args: {
     bead_id: tool.schema.string().describe("Original subtask bead ID"),
     epic_id: tool.schema.string().describe("Parent epic bead ID"),
     original_prompt: tool.schema.string().describe("The prompt given to failed worker"),
-    attempt: tool.schema.number().int().min(1).max(3).describe("Current attempt number (1, 2, or 3)"),
+    attempt: tool.schema.number().int().min(1).max(3).describe("Attempt number hint (1, 2, or 3). Ignored for enforcement when project_path is provided - the server derives the real attempt count from the review event log. Used only as a fallback display value when project_path is omitted."),
     issues: tool.schema.string().describe("JSON array of ReviewIssue objects from swarm_review_feedback"),
     diff: tool.schema
       .string()
@@ -2034,10 +2034,26 @@ export const swarm_spawn_retry = tool({
       .describe("Absolute project path for swarmmail_init"),
   },
   async execute(args) {
+    // Derive the true attempt number server-side from the durable review
+    // event log rather than trusting the caller-supplied `attempt` param -
+    // otherwise a coordinator could pass attempt: 1 forever and defeat the
+    // 3-strike guard entirely. Falls back to the caller value only when
+    // project_path is missing, since there's no project key to query events.
+    let effectiveAttempt = args.attempt;
+    if (args.project_path) {
+      try {
+        const { getAttemptCount } = await import("./swarm-review");
+        effectiveAttempt =
+          (await getAttemptCount(args.project_path, args.bead_id)) + 1;
+      } catch {
+        // Fall back to the caller-supplied attempt if the event log lookup fails
+      }
+    }
+
     // Validate attempt number
-    if (args.attempt > 3) {
+    if (effectiveAttempt > 3) {
       throw new Error(
-        `Retry attempt ${args.attempt} exceeds maximum of 3. After 3 failures, task should be marked blocked.`,
+        `Retry attempt ${effectiveAttempt} exceeds maximum of 3. After 3 failures, task should be marked blocked.`,
       );
     }
 
@@ -2087,7 +2103,7 @@ Review this carefully - some changes may be correct and should be preserved.`
       : "";
 
     // Build the retry prompt
-    const retryPrompt = `⚠️ **RETRY ATTEMPT ${args.attempt}/3**
+    const retryPrompt = `⚠️ **RETRY ATTEMPT ${effectiveAttempt}/3**
 
 This is a retry of a previously attempted subtask. The coordinator reviewed the previous attempt and found issues that need to be fixed.
 
@@ -2110,14 +2126,14 @@ ${args.original_prompt}
 
 ### Step 1: Initialize (REQUIRED FIRST)
 \`\`\`
-swarmmail_init(project_path="${args.project_path || "$PWD"}", task_description="${args.bead_id}: Retry ${args.attempt}/3")
+swarmmail_init(project_path="${args.project_path || "$PWD"}", task_description="${args.bead_id}: Retry ${effectiveAttempt}/3")
 \`\`\`
 
 ### Step 2: Reserve Files
 \`\`\`
 swarmmail_reserve(
   paths=${JSON.stringify(args.files)},
-  reason="${args.bead_id}: Retry attempt ${args.attempt}",
+  reason="${args.bead_id}: Retry attempt ${effectiveAttempt}",
   exclusive=true
 )
 \`\`\`
@@ -2138,7 +2154,7 @@ swarm_complete(
 )
 \`\`\`
 
-**Remember**: This is attempt ${args.attempt} of 3. If this fails review again, there may be an architectural problem that needs human intervention.
+**Remember**: This is attempt ${effectiveAttempt} of 3. If this fails review again, there may be an architectural problem that needs human intervention.
 
 Begin work now.`;
 
@@ -2146,7 +2162,7 @@ Begin work now.`;
       {
         prompt: retryPrompt,
         bead_id: args.bead_id,
-        attempt: args.attempt,
+        attempt: effectiveAttempt,
         max_attempts: 3,
         files: args.files,
         issues_count: issuesArray.length,
