@@ -3,8 +3,9 @@
  *
  * Points a project's opencode agent config at its hive-data mirror
  * (`~/hive-data/repos/<slug>/AGENTS.md` and `memories.jsonl`, plus
- * `~/hive-data/global/memories.jsonl`) without ever writing agentic
- * content (prose, process vocabulary) into the project itself.
+ * `~/hive-data/global/AGENTS.md` and `~/hive-data/global/memories.jsonl`)
+ * without ever writing agentic content (prose, process vocabulary) into
+ * the project itself.
  *
  * Policy:
  * - A project with its own AGENTS.md/CLAUDE.md/MEMORY.md is left alone —
@@ -98,6 +99,11 @@ async function computeInstructions(
 ): Promise<string[]> {
   const hiveDataRoot = resolveHiveDataRepoRoot(hiveDataRepoOptions);
   const instructions: string[] = [];
+
+  const globalAgentsPath = join(hiveDataRoot, "global", "AGENTS.md");
+  if (existsSync(globalAgentsPath)) {
+    instructions.push(globalAgentsPath);
+  }
 
   const globalMemoriesPath = join(hiveDataRoot, "global", "memories.jsonl");
   if (existsSync(globalMemoriesPath)) {

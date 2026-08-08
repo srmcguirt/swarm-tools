@@ -69,6 +69,7 @@ async function initGitRepo(dir: string, remote?: string): Promise<void> {
 /** Build a scratch hive-data root with global/ and repos/<slug>/ populated. */
 function makeHiveDataRoot(opts: {
   global?: boolean;
+  globalAgentsMd?: boolean;
   projectSlugDir?: string;
   projectAgentsMd?: boolean;
 }): string {
@@ -76,6 +77,10 @@ function makeHiveDataRoot(opts: {
   if (opts.global) {
     mkdirSync(join(root, "global"), { recursive: true });
     writeFileSync(join(root, "global", "memories.jsonl"), "");
+  }
+  if (opts.globalAgentsMd) {
+    mkdirSync(join(root, "global"), { recursive: true });
+    writeFileSync(join(root, "global", "AGENTS.md"), "# global rules\n");
   }
   if (opts.projectSlugDir) {
     const dir = join(root, "repos", opts.projectSlugDir);
@@ -166,6 +171,81 @@ describe("bootstrapProjectConfig", () => {
     for (const p of parsed.instructions) {
       expect(existsSync(p)).toBe(true);
     }
+  });
+
+  test("includes the global hive-data AGENTS.md when present", async () => {
+    const project = scratchDir("project-");
+    await initGitRepo(project, "git@github.com:acme/widgets.git");
+    const hiveDataRoot = makeHiveDataRoot({
+      global: true,
+      globalAgentsMd: true,
+      projectSlugDir: "github.com/acme/widgets",
+      projectAgentsMd: true,
+    });
+
+    const result = await bootstrapProjectConfig(project, {
+      hiveDataRepoOptions: { env: { HIVE_DATA_REPO: hiveDataRoot } },
+    });
+
+    expect(result.action).toBe("created");
+    const parsed = JSON.parse(
+      readFileSync(join(project, "opencode.json"), "utf-8"),
+    );
+    const expectedGlobalAgentsPath = join(hiveDataRoot, "global", "AGENTS.md");
+    expect(parsed.instructions).toContain(expectedGlobalAgentsPath);
+    for (const p of parsed.instructions) {
+      expect(existsSync(p)).toBe(true);
+    }
+  });
+
+  test("omits the global AGENTS.md pointer when it doesn't exist", async () => {
+    const project = scratchDir("project-");
+    await initGitRepo(project, "git@github.com:acme/widgets.git");
+    const hiveDataRoot = makeHiveDataRoot({
+      global: true,
+      projectSlugDir: "github.com/acme/widgets",
+    });
+
+    const result = await bootstrapProjectConfig(project, {
+      hiveDataRepoOptions: { env: { HIVE_DATA_REPO: hiveDataRoot } },
+    });
+
+    expect(result.action).toBe("created");
+    const parsed = JSON.parse(
+      readFileSync(join(project, "opencode.json"), "utf-8"),
+    );
+    const notExpectedGlobalAgentsPath = join(
+      hiveDataRoot,
+      "global",
+      "AGENTS.md",
+    );
+    expect(parsed.instructions).not.toContain(notExpectedGlobalAgentsPath);
+  });
+
+  test("orders instructions: global AGENTS.md, global memories, project AGENTS.md, project memories", async () => {
+    const project = scratchDir("project-");
+    await initGitRepo(project, "git@github.com:acme/widgets.git");
+    const hiveDataRoot = makeHiveDataRoot({
+      global: true,
+      globalAgentsMd: true,
+      projectSlugDir: "github.com/acme/widgets",
+      projectAgentsMd: true,
+    });
+
+    const result = await bootstrapProjectConfig(project, {
+      hiveDataRepoOptions: { env: { HIVE_DATA_REPO: hiveDataRoot } },
+    });
+
+    expect(result.action).toBe("created");
+    const parsed = JSON.parse(
+      readFileSync(join(project, "opencode.json"), "utf-8"),
+    );
+    expect(parsed.instructions).toEqual([
+      join(hiveDataRoot, "global", "AGENTS.md"),
+      join(hiveDataRoot, "global", "memories.jsonl"),
+      join(hiveDataRoot, "repos", "github.com/acme/widgets", "AGENTS.md"),
+      join(hiveDataRoot, "repos", "github.com/acme/widgets", "memories.jsonl"),
+    ]);
   });
 
   test("omits the project AGENTS.md pointer when it doesn't exist", async () => {
