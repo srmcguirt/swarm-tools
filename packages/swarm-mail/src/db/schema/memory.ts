@@ -97,6 +97,11 @@ export const memories = sqliteTable("memories", {
   // package_key: repo-root-relative path to the nearest package.json dir (monorepo package)
   repo_key: text("repo_key"),
   package_key: text("package_key"),
+  // Soft-delete / tombstone marker (mirrors hive/beads' deleted_at). NULL =
+  // live, set = deleted. Groundwork only: nothing sets or reads this column
+  // yet. remove() still hard-deletes, and get/list/search/export/import are
+  // not tombstone-aware. Deletion logic is not implemented.
+  deleted_at: text("deleted_at"),
 });
 
 /**

@@ -88,7 +88,8 @@ export async function createLibSQLMemorySchema(db: Client): Promise<void> {
       category TEXT,
       status TEXT DEFAULT 'active',
       repo_key TEXT,
-      package_key TEXT
+      package_key TEXT,
+      deleted_at TEXT
     )
   `);
 
@@ -129,6 +130,11 @@ export async function createLibSQLMemorySchema(db: Client): Promise<void> {
   }
   try {
     await db.execute(`ALTER TABLE memories ADD COLUMN package_key TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    await db.execute(`ALTER TABLE memories ADD COLUMN deleted_at TEXT`);
   } catch {
     /* column already exists */
   }
