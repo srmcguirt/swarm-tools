@@ -2,7 +2,7 @@
  * Per-project opencode.json config bootstrap.
  *
  * Points a project's opencode agent config at its hive-data mirror
- * (`~/hive-data/repos/<slug>/memories.jsonl` and
+ * (`~/hive-data/repos/<slug>/AGENTS.md` and `memories.jsonl`, plus
  * `~/hive-data/global/memories.jsonl`) without ever writing agentic
  * content (prose, process vocabulary) into the project itself.
  *
@@ -105,10 +105,14 @@ async function computeInstructions(
   }
 
   const slug = await resolveHiveDataSlug(projectPath);
-  const projectMemoriesPath = join(
-    hiveDataProjectDir(hiveDataRoot, slug),
-    "memories.jsonl",
-  );
+  const projectDir = hiveDataProjectDir(hiveDataRoot, slug);
+
+  const projectAgentsPath = join(projectDir, "AGENTS.md");
+  if (existsSync(projectAgentsPath)) {
+    instructions.push(projectAgentsPath);
+  }
+
+  const projectMemoriesPath = join(projectDir, "memories.jsonl");
   if (existsSync(projectMemoriesPath)) {
     instructions.push(projectMemoriesPath);
   }
