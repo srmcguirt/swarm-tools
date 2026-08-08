@@ -14,7 +14,7 @@
  *   swarm          - Interactive mode (same as setup)
  */
 
-import * as p from "@clack/prompts";
+import * as p from '@clack/prompts';
 import {
   chmodSync,
   copyFileSync,
@@ -30,10 +30,10 @@ import {
   statSync,
   symlinkSync,
   writeFileSync,
-} from "fs";
-import { homedir } from "os";
-import { basename, dirname, join, resolve } from "path";
-import { fileURLToPath } from "url";
+} from 'fs';
+import { homedir } from 'os';
+import { basename, dirname, join, resolve } from 'path';
+import { fileURLToPath } from 'url';
 import {
   checkBeadsMigrationNeeded,
   migrateBeadsToHive,
@@ -41,8 +41,8 @@ import {
   importJsonlToPGLite,
   ensureHiveDirectory,
   getHiveAdapter,
-} from "../dist/hive.js";
-import { formatCoordinatorPrompt } from "../dist/swarm-prompts.js";
+} from '../dist/hive.js';
+import { formatCoordinatorPrompt } from '../dist/swarm-prompts.js';
 import {
   legacyDatabaseExists,
   migratePGliteToLibSQL,
@@ -57,10 +57,10 @@ import {
   createDurableStreamServer,
   consolidateDatabases,
   getGlobalDbPath,
-} from "swarm-mail";
-import { createMemoryAdapter } from "../src/memory";
-import { execSync, spawn } from "child_process";
-import { tmpdir } from "os";
+} from 'swarm-mail';
+import { createMemoryAdapter } from '../src/memory';
+import { execSync, spawn } from 'child_process';
+import { tmpdir } from 'os';
 
 // Query & observability tools
 import {
@@ -70,56 +70,61 @@ import {
   formatAsTable,
   formatAsCSV,
   formatAsJSON,
-} from "../src/query-tools.js";
+} from '../src/query-tools.js';
 import {
   getWorkerStatus,
   getSubtaskProgress,
   getFileLocks,
   getRecentMessages,
   getEpicList,
-} from "../src/dashboard.js";
+} from '../src/dashboard.js';
 import {
   fetchEpicEvents,
   filterEvents,
   replayWithTiming,
   formatReplayEvent,
-} from "../src/replay-tools.js";
+} from '../src/replay-tools.js';
 import {
   exportToOTLP,
   exportToCSV,
   exportToJSON,
-} from "../src/export-tools.js";
+} from '../src/export-tools.js';
 import {
   querySwarmHistory,
   formatSwarmHistory,
   formatSwarmStats,
   parseTimePeriod,
   aggregateByStrategy,
-} from "../src/observability-tools.js";
+} from '../src/observability-tools.js';
 import {
   getObservabilityHealth,
   formatHealthDashboard,
-} from "../src/observability-health.js";
+} from '../src/observability-health.js';
 
 // Eval tools
-import { getPhase, getScoreHistory, recordEvalRun, getEvalHistoryPath } from "../src/eval-history.js";
-import { DEFAULT_THRESHOLDS, checkGate } from "../src/eval-gates.js";
-import { captureCompactionEvent } from "../src/eval-capture.js";
-import { detectRegressions } from "../src/regression-detection.js";
+import {
+  getPhase,
+  getScoreHistory,
+  recordEvalRun,
+  getEvalHistoryPath,
+} from '../src/eval-history.js';
+import { DEFAULT_THRESHOLDS, checkGate } from '../src/eval-gates.js';
+import { captureCompactionEvent } from '../src/eval-capture.js';
+import { detectRegressions } from '../src/regression-detection.js';
 
 // All tools (for tool command)
-import { allTools } from "../src/index.js";
+import { allTools } from '../src/index.js';
 
 // Skills (for skill-reload command)
-import { invalidateSkillsCache, discoverSkills } from "../src/skills.js";
+import { invalidateSkillsCache, discoverSkills } from '../src/skills.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // When bundled to dist/bin/swarm.js, need to go up two levels to find package.json
-const pkgPath = join(__dirname, "..", "..", "package.json");
-const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+const pkgPath = join(__dirname, '..', '..', 'package.json');
+const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
 const VERSION: string = pkg.version;
 const PACKAGE_ROOT = dirname(pkgPath);
-const CLAUDE_PLUGIN_NAME = "swarm";
+const CLAUDE_PLUGIN_NAME = 'swarm';
 
 // ============================================================================
 // ASCII Art & Branding
@@ -142,7 +147,7 @@ const BANNER = `
  ╚══════╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝
 `;
 
-const TAGLINE = "Multi-agent coordination for OpenCode";
+const TAGLINE = 'Multi-agent coordination for OpenCode';
 
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 const yellow = (s: string) => `\x1b[33m${s}\x1b[0m`;
@@ -152,13 +157,13 @@ const magenta = (s: string) => `\x1b[35m${s}\x1b[0m`;
 const red = (s: string) => `\x1b[31m${s}\x1b[0m`;
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
 
-const PACKAGE_NAME = "opencode-swarm-plugin";
+const PACKAGE_NAME = 'opencode-swarm-plugin';
 
 // ============================================================================
 // File Operation Helpers
 // ============================================================================
 
-type FileStatus = "created" | "updated" | "unchanged";
+type FileStatus = 'created' | 'updated' | 'unchanged';
 
 interface FileStats {
   created: number;
@@ -173,19 +178,23 @@ interface FileStats {
  * @param label - Label for logging (e.g., "Plugin", "Command")
  * @returns Status of the operation
  */
-function writeFileWithStatus(path: string, content: string, label: string): FileStatus {
+function writeFileWithStatus(
+  path: string,
+  content: string,
+  label: string,
+): FileStatus {
   const exists = existsSync(path);
-  
+
   if (exists) {
-    const current = readFileSync(path, "utf-8");
+    const current = readFileSync(path, 'utf-8');
     if (current === content) {
       p.log.message(dim(`  ${label}: ${path} (unchanged)`));
-      return "unchanged";
+      return 'unchanged';
     }
   }
-  
+
   writeFileSync(path, content);
-  const status: FileStatus = exists ? "updated" : "created";
+  const status: FileStatus = exists ? 'updated' : 'created';
   p.log.success(`${label}: ${path} (${status})`);
   return status;
 }
@@ -232,14 +241,14 @@ interface ClaudeHookInput {
  * Resolve the Claude Code plugin root bundled with the package.
  */
 function getClaudePluginRoot(): string {
-  return join(PACKAGE_ROOT, "claude-plugin");
+  return join(PACKAGE_ROOT, 'claude-plugin');
 }
 
 /**
  * Resolve the Claude Code config directory.
  */
 function getClaudeConfigDir(): string {
-  return join(homedir(), ".claude");
+  return join(homedir(), '.claude');
 }
 
 /**
@@ -251,7 +260,7 @@ async function readHookInput<T>(): Promise<T | null> {
   for await (const chunk of process.stdin) {
     chunks.push(chunk.toString());
   }
-  const raw = chunks.join("").trim();
+  const raw = chunks.join('').trim();
   if (!raw) return null;
   try {
     return JSON.parse(raw) as T;
@@ -281,7 +290,7 @@ function resolveClaudeProjectPath(input: ClaudeHookInput | null): string {
 function writeClaudeHookOutput(
   hookEventName: string,
   additionalContext: string,
-  options?: { suppressOutput?: boolean }
+  options?: { suppressOutput?: boolean },
 ): void {
   if (!additionalContext.trim()) return;
   process.stdout.write(
@@ -324,7 +333,7 @@ interface ClaudeInstallStatus {
 function getClaudeInstallStatus(projectPath: string): ClaudeInstallStatus {
   const pluginRoot = getClaudePluginRoot();
   const claudeConfigDir = getClaudeConfigDir();
-  const globalPluginPath = join(claudeConfigDir, "plugins", CLAUDE_PLUGIN_NAME);
+  const globalPluginPath = join(claudeConfigDir, 'plugins', CLAUDE_PLUGIN_NAME);
 
   let globalPluginExists = false;
   let globalPluginLinked = false;
@@ -344,15 +353,17 @@ function getClaudeInstallStatus(projectPath: string): ClaudeInstallStatus {
     }
   }
 
-  const projectClaudeDir = join(projectPath, ".claude");
+  const projectClaudeDir = join(projectPath, '.claude');
   const projectConfigPaths = [
-    join(projectClaudeDir, "commands"),
-    join(projectClaudeDir, "agents"),
-    join(projectClaudeDir, "skills"),
-    join(projectClaudeDir, "hooks"),
-    join(projectClaudeDir, ".mcp.json"),
+    join(projectClaudeDir, 'commands'),
+    join(projectClaudeDir, 'agents'),
+    join(projectClaudeDir, 'skills'),
+    join(projectClaudeDir, 'hooks'),
+    join(projectClaudeDir, '.mcp.json'),
   ];
-  const projectConfigExists = projectConfigPaths.some((path) => existsSync(path));
+  const projectConfigExists = projectConfigPaths.some((path) =>
+    existsSync(path),
+  );
 
   return {
     pluginRoot,
@@ -370,18 +381,18 @@ function getClaudeInstallStatus(projectPath: string): ClaudeInstallStatus {
 // Seasonal Messages (inspired by Astro's Houston)
 // ============================================================================
 
-type Season = "spooky" | "holiday" | "new-year" | "summer" | "default";
+type Season = 'spooky' | 'holiday' | 'new-year' | 'summer' | 'default';
 
 function getSeason(): Season {
   const date = new Date();
   const month = date.getMonth() + 1;
   const day = date.getDate();
 
-  if (month === 1 && day <= 7) return "new-year";
-  if (month === 10 && day > 7) return "spooky";
-  if (month === 12 && day > 7 && day < 26) return "holiday";
-  if (month >= 6 && month <= 8) return "summer";
-  return "default";
+  if (month === 1 && day <= 7) return 'new-year';
+  if (month === 10 && day > 7) return 'spooky';
+  if (month === 12 && day > 7 && day < 26) return 'holiday';
+  if (month >= 6 && month <= 8) return 'summer';
+  return 'default';
 }
 
 interface SeasonalBee {
@@ -394,7 +405,7 @@ function getSeasonalBee(): SeasonalBee {
   const year = new Date().getFullYear();
 
   switch (season) {
-    case "new-year":
+    case 'new-year':
       return {
         messages: [
           `New year, new swarm! Let's build something amazing in ${year}!`,
@@ -402,9 +413,9 @@ function getSeasonalBee(): SeasonalBee {
           `Kicking off ${year} with coordinated chaos!`,
           `Happy ${year}! Time to orchestrate some magic.`,
         ],
-        decorations: ["🎉", "🎊", "✨"],
+        decorations: ['🎉', '🎊', '✨'],
       };
-    case "spooky":
+    case 'spooky':
       return {
         messages: [
           `Boo! Just kidding. Let's spawn some agents!`,
@@ -413,9 +424,9 @@ function getSeasonalBee(): SeasonalBee {
           `Let's conjure up a swarm of worker bees!`,
           `Something wicked this way computes...`,
         ],
-        decorations: ["🎃", "👻", "🕷️", "🦇"],
+        decorations: ['🎃', '👻', '🕷️', '🦇'],
       };
-    case "holiday":
+    case 'holiday':
       return {
         messages: [
           `'Tis the season to parallelize!`,
@@ -424,9 +435,9 @@ function getSeasonalBee(): SeasonalBee {
           `Jingle bells, agents swell, tasks get done today!`,
           `The best gift? A well-coordinated swarm.`,
         ],
-        decorations: ["🎄", "🎁", "❄️", "⭐"],
+        decorations: ['🎄', '🎁', '❄️', '⭐'],
       };
-    case "summer":
+    case 'summer':
       return {
         messages: [
           `Summer vibes and parallel pipelines!`,
@@ -434,7 +445,7 @@ function getSeasonalBee(): SeasonalBee {
           `Hot code, cool agents. Let's go!`,
           `Beach day? Nah, build day!`,
         ],
-        decorations: ["☀️", "🌻", "🌴"],
+        decorations: ['☀️', '🌻', '🌴'],
       };
     default:
       return {
@@ -464,7 +475,7 @@ function getDecoratedBee(): string {
   const decoration =
     decorations[Math.floor(Math.random() * decorations.length)];
   // Add decoration to the bee
-  return cyan(BEE.replace("bzzzz...", `bzzzz... ${decoration}`));
+  return cyan(BEE.replace('bzzzz...', `bzzzz... ${decoration}`));
 }
 
 // ============================================================================
@@ -479,141 +490,94 @@ interface ModelOption {
 
 const COORDINATOR_MODELS: ModelOption[] = [
   {
-    value: "anthropic/claude-sonnet-4-5",
-    label: "Claude Sonnet 4.5",
-    hint: "Best balance of speed and capability (recommended)",
+    value: 'anthropic/claude-sonnet-4-5',
+    label: 'Claude Sonnet 4.5',
+    hint: 'Best balance of speed and capability (recommended)',
   },
   {
-    value: "anthropic/claude-opus-4-5",
-    label: "Claude Opus 4.5",
-    hint: "Most capable, slower and more expensive",
+    value: 'anthropic/claude-opus-4-5',
+    label: 'Claude Opus 4.5',
+    hint: 'Most capable, slower and more expensive',
   },
   {
-    value: "openai/gpt-4o",
-    label: "GPT-4o",
-    hint: "Fast, good for most tasks",
+    value: 'openai/gpt-4o',
+    label: 'GPT-4o',
+    hint: 'Fast, good for most tasks',
   },
   {
-    value: "google/gemini-2.0-flash",
-    label: "Gemini 2.0 Flash",
-    hint: "Fast and capable",
+    value: 'google/gemini-2.0-flash',
+    label: 'Gemini 2.0 Flash',
+    hint: 'Fast and capable',
   },
   {
-    value: "google/gemini-1.5-pro",
-    label: "Gemini 1.5 Pro",
-    hint: "More capable, larger context",
+    value: 'google/gemini-1.5-pro',
+    label: 'Gemini 1.5 Pro',
+    hint: 'More capable, larger context',
   },
 ];
 
 const WORKER_MODELS: ModelOption[] = [
   {
-    value: "anthropic/claude-haiku-4-5",
-    label: "Claude Haiku 4.5",
-    hint: "Fast and cost-effective (recommended)",
+    value: 'anthropic/claude-haiku-4-5',
+    label: 'Claude Haiku 4.5',
+    hint: 'Fast and cost-effective (recommended)',
   },
   {
-    value: "anthropic/claude-sonnet-4-5",
-    label: "Claude Sonnet 4.5",
-    hint: "More capable, slower",
+    value: 'anthropic/claude-sonnet-4-5',
+    label: 'Claude Sonnet 4.5',
+    hint: 'More capable, slower',
   },
   {
-    value: "openai/gpt-4o-mini",
-    label: "GPT-4o Mini",
-    hint: "Fast and cheap",
+    value: 'openai/gpt-4o-mini',
+    label: 'GPT-4o Mini',
+    hint: 'Fast and cheap',
   },
   {
-    value: "google/gemini-2.0-flash",
-    label: "Gemini 2.0 Flash",
-    hint: "Fast and capable",
+    value: 'google/gemini-2.0-flash',
+    label: 'Gemini 2.0 Flash',
+    hint: 'Fast and capable',
   },
 ];
 
 // ============================================================================
 // Update Checking
 // ============================================================================
+//
+// No automatic version fetch or install here, on purpose. This package is
+// published unscoped on npmjs by a name-squatted account running a broken
+// build (all three known bugs). A prior version of this file fetched
+// `registry.npmjs.org/opencode-swarm-plugin/latest` and shelled out to
+// `npm install -g opencode-swarm-plugin@latest` when it thought that was
+// newer — i.e. it would silently downgrade to the malicious build and
+// auto-execute an install command built from an unauthenticated network
+// response. `swarm update` now only prints the correct scoped-alias install
+// command; the user always runs it themselves.
 
-interface UpdateInfo {
-  current: string;
-  latest: string;
-  updateAvailable: boolean;
-}
-
-async function checkForUpdates(): Promise<UpdateInfo | null> {
-  try {
-    const response = await fetch(
-      `https://registry.npmjs.org/${PACKAGE_NAME}/latest`,
-      {
-        signal: AbortSignal.timeout(3000), // 3 second timeout
-      },
-    );
-    if (!response.ok) return null;
-    const data = await response.json();
-    const latest = data.version;
-    const updateAvailable =
-      latest !== VERSION && compareVersions(latest, VERSION) > 0;
-    return { current: VERSION, latest, updateAvailable };
-  } catch {
-    return null; // Silently fail - don't block CLI
-  }
-}
-
-function compareVersions(a: string, b: string): number {
-  const partsA = a.split(".").map(Number);
-  const partsB = b.split(".").map(Number);
-  for (let i = 0; i < 3; i++) {
-    if (partsA[i] > partsB[i]) return 1;
-    if (partsA[i] < partsB[i]) return -1;
-  }
-  return 0;
-}
-
-function showUpdateNotification(info: UpdateInfo) {
-  if (info.updateAvailable) {
-    console.log();
-    console.log(
-      yellow("  ╭─────────────────────────────────────────────────────╮"),
-    );
-    console.log(
-      yellow("  │") +
-        "  Update available! " +
-        dim(info.current) +
-        " → " +
-        green(info.latest) +
-        "                " +
-        yellow("│"),
-    );
-    console.log(
-      yellow("  │") +
-        "  Run: " +
-        cyan("npm install -g " + PACKAGE_NAME + "@latest") +
-        "  " +
-        yellow("│"),
-    );
-    console.log(
-      yellow("  │") +
-        "  Or:  " +
-        cyan("swarm update") +
-        "                                " +
-        yellow("│"),
-    );
-    console.log(
-      yellow("  ╰─────────────────────────────────────────────────────╯"),
-    );
-    console.log();
-  }
-}
+const CORRECT_INSTALL_BUN =
+  'bun add -g opencode-swarm-plugin@npm:@srmcguirt/opencode-swarm-plugin@latest';
+const CORRECT_INSTALL_NPM =
+  'npm install -g opencode-swarm-plugin@npm:@srmcguirt/opencode-swarm-plugin@latest';
 
 // ============================================================================
 // Types
 // ============================================================================
 
-type InstallType = "brew" | "npm" | "bun" | "pnpm" | "yarn" | "paru" | "choco" | "scoop" | "manual";
+type InstallType =
+  | 'brew'
+  | 'npm'
+  | 'bun'
+  | 'pnpm'
+  | 'yarn'
+  | 'paru'
+  | 'choco'
+  | 'scoop'
+  | 'manual';
 
 interface InstallMethod {
   name: string;
   command: string;
   type: InstallType;
-  platforms?: ("darwin" | "linux" | "win32")[];
+  platforms?: ('darwin' | 'linux' | 'win32')[];
   requires?: string; // Command that must exist for this method to work
 }
 
@@ -645,118 +609,118 @@ interface CheckResult {
 const OPENCODE_INSTALL_METHODS: InstallMethod[] = [
   // Universal (works on macOS and Linux)
   {
-    name: "curl (recommended)",
-    command: "curl -fsSL https://opencode.ai/install | bash",
-    type: "manual",
-    platforms: ["darwin", "linux"],
-    requires: "curl",
+    name: 'curl (recommended)',
+    command: 'curl -fsSL https://opencode.ai/install | bash',
+    type: 'manual',
+    platforms: ['darwin', 'linux'],
+    requires: 'curl',
   },
   // macOS and Linux package managers
   {
-    name: "Homebrew",
-    command: "brew install opencode",
-    type: "brew",
-    platforms: ["darwin", "linux"],
-    requires: "brew",
+    name: 'Homebrew',
+    command: 'brew install opencode',
+    type: 'brew',
+    platforms: ['darwin', 'linux'],
+    requires: 'brew',
   },
   // Node.js package managers (cross-platform)
   {
-    name: "npm",
-    command: "npm install -g opencode-ai",
-    type: "npm",
-    requires: "npm",
+    name: 'npm',
+    command: 'npm install -g opencode-ai',
+    type: 'npm',
+    requires: 'npm',
   },
   {
-    name: "Bun",
-    command: "bun install -g opencode-ai",
-    type: "bun",
-    requires: "bun",
+    name: 'Bun',
+    command: 'bun install -g opencode-ai',
+    type: 'bun',
+    requires: 'bun',
   },
   {
-    name: "pnpm",
-    command: "pnpm install -g opencode-ai",
-    type: "pnpm",
-    requires: "pnpm",
+    name: 'pnpm',
+    command: 'pnpm install -g opencode-ai',
+    type: 'pnpm',
+    requires: 'pnpm',
   },
   {
-    name: "Yarn",
-    command: "yarn global add opencode-ai",
-    type: "yarn",
-    requires: "yarn",
+    name: 'Yarn',
+    command: 'yarn global add opencode-ai',
+    type: 'yarn',
+    requires: 'yarn',
   },
   // Linux-specific
   {
-    name: "paru (Arch Linux)",
-    command: "paru -S opencode-bin",
-    type: "paru",
-    platforms: ["linux"],
-    requires: "paru",
+    name: 'paru (Arch Linux)',
+    command: 'paru -S opencode-bin',
+    type: 'paru',
+    platforms: ['linux'],
+    requires: 'paru',
   },
   // Windows-specific
   {
-    name: "Chocolatey",
-    command: "choco install opencode",
-    type: "choco",
-    platforms: ["win32"],
-    requires: "choco",
+    name: 'Chocolatey',
+    command: 'choco install opencode',
+    type: 'choco',
+    platforms: ['win32'],
+    requires: 'choco',
   },
   {
-    name: "Scoop",
-    command: "scoop bucket add extras && scoop install extras/opencode",
-    type: "scoop",
-    platforms: ["win32"],
-    requires: "scoop",
+    name: 'Scoop',
+    command: 'scoop bucket add extras && scoop install extras/opencode',
+    type: 'scoop',
+    platforms: ['win32'],
+    requires: 'scoop',
   },
 ];
 
 const DEPENDENCIES: Dependency[] = [
   {
-    name: "Bun",
-    command: "bun",
-    checkArgs: ["--version"],
+    name: 'Bun',
+    command: 'bun',
+    checkArgs: ['--version'],
     required: true,
-    install: "curl -fsSL https://bun.sh/install | bash",
-    installType: "manual",
-    description: "JavaScript runtime (required for CLI)",
+    install: 'curl -fsSL https://bun.sh/install | bash',
+    installType: 'manual',
+    description: 'JavaScript runtime (required for CLI)',
   },
   {
-    name: "OpenCode",
-    command: "opencode",
-    checkArgs: ["--version"],
+    name: 'OpenCode',
+    command: 'opencode',
+    checkArgs: ['--version'],
     required: true,
-    install: "curl -fsSL https://opencode.ai/install | bash", // Default to curl
-    installType: "manual",
+    install: 'curl -fsSL https://opencode.ai/install | bash', // Default to curl
+    installType: 'manual',
     installMethods: OPENCODE_INSTALL_METHODS,
-    description: "AI coding assistant (plugin host)",
+    description: 'AI coding assistant (plugin host)',
   },
   // Note: Beads CLI (bd) is NO LONGER required - we use HiveAdapter from swarm-mail
   // which provides the same functionality programmatically without external dependencies
   {
-    name: "CASS (Coding Agent Session Search)",
-    command: "cass",
-    checkArgs: ["--help"],
+    name: 'CASS (Coding Agent Session Search)',
+    command: 'cass',
+    checkArgs: ['--help'],
     required: false,
-    install: "https://github.com/Dicklesworthstone/coding_agent_session_search",
-    installType: "manual",
-    description: "Indexes and searches AI coding agent history for context",
+    install: 'https://github.com/Dicklesworthstone/coding_agent_session_search',
+    installType: 'manual',
+    description: 'Indexes and searches AI coding agent history for context',
   },
   {
-    name: "UBS (Ultimate Bug Scanner)",
-    command: "ubs",
-    checkArgs: ["--help"],
+    name: 'UBS (Ultimate Bug Scanner)',
+    command: 'ubs',
+    checkArgs: ['--help'],
     required: false,
-    install: "https://github.com/Dicklesworthstone/ultimate_bug_scanner",
-    installType: "manual",
-    description: "AI-powered static analysis for pre-completion bug scanning",
+    install: 'https://github.com/Dicklesworthstone/ultimate_bug_scanner',
+    installType: 'manual',
+    description: 'AI-powered static analysis for pre-completion bug scanning',
   },
   {
-    name: "Ollama",
-    command: "ollama",
-    checkArgs: ["--version"],
+    name: 'Ollama',
+    command: 'ollama',
+    checkArgs: ['--version'],
     required: false,
-    install: "brew install ollama && ollama pull mxbai-embed-large",
-    installType: "brew",
-    description: "Local embeddings for semantic memory (embedded in plugin)",
+    install: 'brew install ollama && ollama pull mxbai-embed-large',
+    installType: 'brew',
+    description: 'Local embeddings for semantic memory (embedded in plugin)',
   },
 ];
 
@@ -771,19 +735,19 @@ async function checkCommand(
   return new Promise((resolve) => {
     try {
       const proc = spawn(cmd, args, {
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
-      
-      let stdout = "";
-      proc.stdout?.on("data", (data) => {
+
+      let stdout = '';
+      proc.stdout?.on('data', (data) => {
         stdout += data.toString();
       });
-      
-      proc.on("error", () => {
+
+      proc.on('error', () => {
         resolve({ available: false });
       });
-      
-      proc.on("close", (exitCode) => {
+
+      proc.on('close', (exitCode) => {
         if (exitCode === 0) {
           const versionMatch = stdout.match(/v?(\d+\.\d+\.\d+)/);
           resolve({ available: true, version: versionMatch?.[1] });
@@ -800,15 +764,15 @@ async function checkCommand(
 async function runInstall(command: string): Promise<boolean> {
   return new Promise((resolve) => {
     try {
-      const proc = spawn("bash", ["-c", command], {
-        stdio: "inherit",
+      const proc = spawn('bash', ['-c', command], {
+        stdio: 'inherit',
       });
-      
-      proc.on("error", () => {
+
+      proc.on('error', () => {
         resolve(false);
       });
-      
-      proc.on("close", (exitCode) => {
+
+      proc.on('close', (exitCode) => {
         resolve(exitCode === 0);
       });
     } catch {
@@ -837,7 +801,7 @@ async function checkAllDependencies(): Promise<CheckResult[]> {
 async function getAvailableInstallMethods(
   methods: InstallMethod[],
 ): Promise<InstallMethod[]> {
-  const platform = process.platform as "darwin" | "linux" | "win32";
+  const platform = process.platform as 'darwin' | 'linux' | 'win32';
   const available: InstallMethod[] = [];
 
   for (const method of methods) {
@@ -848,14 +812,21 @@ async function getAvailableInstallMethods(
 
     // Check if required command is available
     if (method.requires) {
-      const { available: cmdAvailable } = await checkCommand(method.requires, ["--version"]);
+      const { available: cmdAvailable } = await checkCommand(method.requires, [
+        '--version',
+      ]);
       // Some commands don't support --version, try --help as fallback
       if (!cmdAvailable) {
-        const { available: helpAvailable } = await checkCommand(method.requires, ["--help"]);
+        const { available: helpAvailable } = await checkCommand(
+          method.requires,
+          ['--help'],
+        );
         if (!helpAvailable) {
           // Special case: curl doesn't have --version on some systems, check with -V
-          if (method.requires === "curl") {
-            const { available: curlAvailable } = await checkCommand("curl", ["-V"]);
+          if (method.requires === 'curl') {
+            const { available: curlAvailable } = await checkCommand('curl', [
+              '-V',
+            ]);
             if (!curlAvailable) continue;
           } else {
             continue;
@@ -878,8 +849,10 @@ async function promptInstallMethod(
   availableMethods: InstallMethod[],
 ): Promise<InstallMethod | null> {
   if (availableMethods.length === 0) {
-    p.log.error(`No installation methods available for ${dep.name} on this system`);
-    p.log.message(dim("  You may need to install it manually"));
+    p.log.error(
+      `No installation methods available for ${dep.name} on this system`,
+    );
+    p.log.message(dim('  You may need to install it manually'));
     return null;
   }
 
@@ -908,7 +881,7 @@ async function promptInstallMethod(
 // Skills Sync Utilities
 // ============================================================================
 
-const BUNDLED_SKILL_MARKER_FILENAME = ".swarm-bundled-skill.json";
+const BUNDLED_SKILL_MARKER_FILENAME = '.swarm-bundled-skill.json';
 
 function listDirectoryNames(dirPath: string): string[] {
   if (!existsSync(dirPath)) return [];
@@ -954,7 +927,7 @@ function writeBundledSkillMarker(
     markerPath,
     JSON.stringify(
       {
-        managed_by: "opencode-swarm-plugin",
+        managed_by: 'opencode-swarm-plugin',
         version: info.version,
         synced_at: new Date().toISOString(),
       },
@@ -1010,8 +983,8 @@ function syncBundledSkillsToGlobal({
 // AGENTS.md Update Utilities
 // ============================================================================
 
-function detectNewline(content: string): "\r\n" | "\n" {
-  return content.includes("\r\n") ? "\r\n" : "\n";
+function detectNewline(content: string): '\r\n' | '\n' {
+  return content.includes('\r\n') ? '\r\n' : '\n';
 }
 
 function backupFileWithTimestamp(filePath: string): string | null {
@@ -1020,8 +993,8 @@ function backupFileWithTimestamp(filePath: string): string | null {
     const base = basename(filePath);
     const timestamp = new Date()
       .toISOString()
-      .replace(/[:.]/g, "")
-      .replace(/Z$/, "Z");
+      .replace(/[:.]/g, '')
+      .replace(/Z$/, 'Z');
     const backupPath = join(dir, `${base}.swarm-backup-${timestamp}`);
     copyFileSync(filePath, backupPath);
     return backupPath;
@@ -1035,24 +1008,24 @@ function buildAgentsSkillsSection(
   newline: string,
 ): string {
   return [
-    "## Skills - Knowledge Injection",
-    "",
-    "Skills are reusable knowledge packages. Load them on-demand for specialized tasks.",
-    "",
-    "### When to Use",
-    "",
-    "- Before unfamiliar work - check if a skill exists",
-    "- When you need domain-specific patterns",
-    "- For complex workflows that benefit from guidance",
-    "",
-    "### Usage",
-    "",
-    "```bash",
-    "skills_list()                              # See available skills",
+    '## Skills - Knowledge Injection',
+    '',
+    'Skills are reusable knowledge packages. Load them on-demand for specialized tasks.',
+    '',
+    '### When to Use',
+    '',
+    '- Before unfamiliar work - check if a skill exists',
+    '- When you need domain-specific patterns',
+    '- For complex workflows that benefit from guidance',
+    '',
+    '### Usage',
+    '',
+    '```bash',
+    'skills_list()                              # See available skills',
     'skills_use(name="swarm-coordination")      # Load a skill',
     'skills_use(name="cli-builder", context="building a new CLI") # With context',
-    "```",
-    "",
+    '```',
+    '',
     `**Bundled Skills:** ${bundledSkillsCsv}`,
   ].join(newline);
 }
@@ -1063,152 +1036,152 @@ function buildAgentsSkillsSection(
  */
 function buildAgentsHivemindSection(newline: string): string {
   return [
-    "## Hivemind - Unified Memory System",
-    "",
-    "The hive remembers everything. Learnings, sessions, patterns—all searchable.",
-    "",
-    "**Unified storage:** Manual learnings and AI agent session histories stored in the same database, searchable together. Powered by libSQL vectors + Ollama embeddings.",
-    "",
-    "**Indexed agents:** Claude Code, Codex, Cursor, Gemini, Aider, ChatGPT, Cline, OpenCode, Amp, Pi-Agent",
-    "",
-    "### When to Use",
-    "",
-    "- **BEFORE implementing** - check if you or any agent solved it before",
-    "- **After solving hard problems** - store learnings for future sessions",
-    "- **Debugging** - search past sessions for similar errors",
-    "- **Architecture decisions** - record reasoning, alternatives, tradeoffs",
-    "- **Project-specific patterns** - capture domain rules and gotchas",
-    "",
-    "### Tools",
-    "",
-    "| Tool | Purpose |",
-    "|------|---------|",
-    "| `hivemind_store` | Store a memory (learnings, decisions, patterns) |",
-    "| `hivemind_find` | Search all memories (learnings + sessions, semantic + FTS fallback) |",
-    "| `hivemind_get` | Get specific memory by ID |",
-    "| `hivemind_remove` | Delete outdated/incorrect memory |",
-    "| `hivemind_validate` | Confirm memory still accurate (resets 90-day decay timer) |",
-    "| `hivemind_stats` | Memory statistics and health check |",
-    "| `hivemind_index` | Index AI session directories |",
-    "| `hivemind_sync` | Sync to .hive/memories.jsonl (git-backed, team-shared) |",
-    "",
-    "### Usage",
-    "",
-    "**Store a learning** (include WHY, not just WHAT):",
-    "",
-    "```typescript",
-    "hivemind_store({",
+    '## Hivemind - Unified Memory System',
+    '',
+    'The hive remembers everything. Learnings, sessions, patterns—all searchable.',
+    '',
+    '**Unified storage:** Manual learnings and AI agent session histories stored in the same database, searchable together. Powered by libSQL vectors + Ollama embeddings.',
+    '',
+    '**Indexed agents:** Claude Code, Codex, Cursor, Gemini, Aider, ChatGPT, Cline, OpenCode, Amp, Pi-Agent',
+    '',
+    '### When to Use',
+    '',
+    '- **BEFORE implementing** - check if you or any agent solved it before',
+    '- **After solving hard problems** - store learnings for future sessions',
+    '- **Debugging** - search past sessions for similar errors',
+    '- **Architecture decisions** - record reasoning, alternatives, tradeoffs',
+    '- **Project-specific patterns** - capture domain rules and gotchas',
+    '',
+    '### Tools',
+    '',
+    '| Tool | Purpose |',
+    '|------|---------|',
+    '| `hivemind_store` | Store a memory (learnings, decisions, patterns) |',
+    '| `hivemind_find` | Search all memories (learnings + sessions, semantic + FTS fallback) |',
+    '| `hivemind_get` | Get specific memory by ID |',
+    '| `hivemind_remove` | Delete outdated/incorrect memory |',
+    '| `hivemind_validate` | Confirm memory still accurate (resets 90-day decay timer) |',
+    '| `hivemind_stats` | Memory statistics and health check |',
+    '| `hivemind_index` | Index AI session directories |',
+    '| `hivemind_sync` | Sync to .hive/memories.jsonl (git-backed, team-shared) |',
+    '',
+    '### Usage',
+    '',
+    '**Store a learning** (include WHY, not just WHAT):',
+    '',
+    '```typescript',
+    'hivemind_store({',
     '  information: "OAuth refresh tokens need 5min buffer before expiry to avoid race conditions. Without buffer, token refresh can fail mid-request if expiry happens between check and use.",',
     '  tags: "auth,oauth,tokens,race-conditions"',
-    "})",
-    "```",
-    "",
-    "**Search all memories** (learnings + sessions):",
-    "",
-    "```typescript",
-    "// Search everything",
+    '})',
+    '```',
+    '',
+    '**Search all memories** (learnings + sessions):',
+    '',
+    '```typescript',
+    '// Search everything',
     'hivemind_find({ query: "token refresh", limit: 5 })',
-    "",
-    "// Search only learnings (manual entries)",
+    '',
+    '// Search only learnings (manual entries)',
     'hivemind_find({ query: "authentication", collection: "default" })',
-    "",
-    "// Search only Claude sessions",
+    '',
+    '// Search only Claude sessions',
     'hivemind_find({ query: "Next.js caching", collection: "claude" })',
-    "",
-    "// Search only Cursor sessions",
+    '',
+    '// Search only Cursor sessions',
     'hivemind_find({ query: "API design", collection: "cursor" })',
-    "```",
-    "",
-    "**Get specific memory**:",
-    "",
-    "```typescript",
+    '```',
+    '',
+    '**Get specific memory**:',
+    '',
+    '```typescript',
     'hivemind_get({ id: "mem_xyz123" })',
-    "```",
-    "",
-    "**Delete outdated memory**:",
-    "",
-    "```typescript",
+    '```',
+    '',
+    '**Delete outdated memory**:',
+    '',
+    '```typescript',
     'hivemind_remove({ id: "mem_old456" })',
-    "```",
-    "",
-    "**Validate memory is still accurate** (resets decay):",
-    "",
-    "```typescript",
-    "// Confirmed this memory is still relevant",
+    '```',
+    '',
+    '**Validate memory is still accurate** (resets decay):',
+    '',
+    '```typescript',
+    '// Confirmed this memory is still relevant',
     'hivemind_validate({ id: "mem_xyz123" })',
-    "```",
-    "",
-    "**Index new sessions**:",
-    "",
-    "```typescript",
-    "// Automatically indexes ~/.config/opencode/sessions, ~/.cursor-tutor, etc.",
-    "hivemind_index()",
-    "```",
-    "",
-    "**Sync to git**:",
-    "",
-    "```typescript",
-    "// Writes learnings to .hive/memories.jsonl for git sync",
-    "hivemind_sync()",
-    "```",
-    "",
-    "**Check stats**:",
-    "",
-    "```typescript",
-    "hivemind_stats()",
-    "```",
-    "",
-    "### Usage Pattern",
-    "",
-    "```bash",
-    "# 1. Before starting work - query for relevant learnings",
+    '```',
+    '',
+    '**Index new sessions**:',
+    '',
+    '```typescript',
+    '// Automatically indexes ~/.config/opencode/sessions, ~/.cursor-tutor, etc.',
+    'hivemind_index()',
+    '```',
+    '',
+    '**Sync to git**:',
+    '',
+    '```typescript',
+    '// Writes learnings to .hive/memories.jsonl for git sync',
+    'hivemind_sync()',
+    '```',
+    '',
+    '**Check stats**:',
+    '',
+    '```typescript',
+    'hivemind_stats()',
+    '```',
+    '',
+    '### Usage Pattern',
+    '',
+    '```bash',
+    '# 1. Before starting work - query for relevant learnings',
     'hivemind_find({ query: "<task keywords>", limit: 5 })',
-    "",
-    "# 2. Do the work...",
-    "",
-    "# 3. After solving hard problem - store learning",
-    "hivemind_store({",
+    '',
+    '# 2. Do the work...',
+    '',
+    '# 3. After solving hard problem - store learning',
+    'hivemind_store({',
     '  information: "<what you learned, WHY it matters>",',
     '  tags: "<relevant,tags>"',
-    "})",
-    "",
+    '})',
+    '',
     "# 4. Validate memories when you confirm they're still accurate",
     'hivemind_validate({ id: "<memory-id>" })',
-    "```",
-    "",
-    "### Integration with Workflow",
-    "",
-    "**At task start** (query BEFORE implementing):",
-    "",
-    "```bash",
-    "# Check if you or any agent solved similar problems",
+    '```',
+    '',
+    '### Integration with Workflow',
+    '',
+    '**At task start** (query BEFORE implementing):',
+    '',
+    '```bash',
+    '# Check if you or any agent solved similar problems',
     'hivemind_find({ query: "OAuth token refresh buffer", limit: 5 })',
-    "```",
-    "",
-    "**During debugging** (search past sessions):",
-    "",
-    "```bash",
-    "# Find similar errors from past sessions",
+    '```',
+    '',
+    '**During debugging** (search past sessions):',
+    '',
+    '```bash',
+    '# Find similar errors from past sessions',
     'hivemind_find({ query: "cannot read property of undefined", collection: "claude" })',
-    "```",
-    "",
-    "**After solving problems** (store learnings):",
-    "",
-    "```bash",
+    '```',
+    '',
+    '**After solving problems** (store learnings):',
+    '',
+    '```bash',
     '# Store root cause + solution, not just "fixed it"',
-    "hivemind_store({",
+    'hivemind_store({',
     '  information: "Next.js searchParams causes dynamic rendering. Workaround: destructure in parent, pass as props to cached child.",',
     '  tags: "nextjs,cache-components,dynamic-rendering,searchparams"',
-    "})",
-    "```",
-    "",
-    "**Learning from other agents**:",
-    "",
-    "```bash",
-    "# See how Cursor handled similar feature",
+    '})',
+    '```',
+    '',
+    '**Learning from other agents**:',
+    '',
+    '```bash',
+    '# See how Cursor handled similar feature',
     'hivemind_find({ query: "implement authentication", collection: "cursor" })',
-    "```",
-    "",
+    '```',
+    '',
     "**Pro tip:** Query Hivemind at the START of complex tasks. Past solutions (yours or other agents') save time and prevent reinventing wheels.",
   ].join(newline);
 }
@@ -1226,63 +1199,63 @@ function buildAgentsSemanticMemorySection(newline: string): string {
 
 function buildAgentsSwarmCoordinatorSection(newline: string): string {
   return [
-    "## Swarm Coordinator Checklist (MANDATORY)",
-    "",
-    "When coordinating a swarm, you MUST monitor workers and review their output.",
-    "",
-    "### Monitor Loop",
-    "",
-    "```",
-    "┌─────────────────────────────────────────────────────────────┐",
-    "│                 COORDINATOR MONITOR LOOP                    │",
-    "├─────────────────────────────────────────────────────────────┤",
-    "│                                                             │",
-    "│  1. CHECK INBOX                                             │",
-    "│     swarmmail_inbox()                                       │",
-    "│     swarmmail_read_message(message_id=N)                    │",
-    "│                                                             │",
-    "│  2. CHECK STATUS                                            │",
-    "│     swarm_status(epic_id, project_key)                      │",
-    "│                                                             │",
-    "│  3. REVIEW COMPLETED WORK                                   │",
-    "│     swarm_review(project_key, epic_id, task_id, files)      │",
-    "│     → Generates review prompt with epic context + diff      │",
-    "│                                                             │",
-    "│  4. SEND FEEDBACK                                           │",
-    "│     swarm_review_feedback(                                  │",
-    "│       project_key, task_id, worker_id,                      │",
-    "│       status=\"approved|needs_changes\",                      │",
-    "│       issues=\"[{file, line, issue, suggestion}]\"            │",
-    "│     )                                                       │",
-    "│                                                             │",
-    "│  5. INTERVENE IF NEEDED                                     │",
-    "│     - Blocked >5min → unblock or reassign                   │",
-    "│     - File conflicts → mediate                              │",
-    "│     - Scope creep → approve or reject                       │",
-    "│     - 3 review failures → escalate to human                 │",
-    "│                                                             │",
-    "└─────────────────────────────────────────────────────────────┘",
-    "```",
-    "",
-    "### Review Tools",
-    "",
-    "| Tool | Purpose |",
-    "|------|---------|",
-    "| `swarm_review` | Generate review prompt with epic context, dependencies, and git diff |",
-    "| `swarm_review_feedback` | Send approval/rejection to worker (tracks 3-strike rule) |",
-    "",
-    "### Review Criteria",
-    "",
-    "- Does work fulfill subtask requirements?",
-    "- Does it serve the overall epic goal?",
-    "- Does it enable downstream tasks?",
-    "- Type safety, no obvious bugs?",
-    "",
-    "### 3-Strike Rule",
-    "",
-    "After 3 review rejections, task is marked **blocked**. This signals an architectural problem, not \"try harder.\"",
-    "",
-    "**NEVER skip the review step.** Workers complete faster when they get feedback.",
+    '## Swarm Coordinator Checklist (MANDATORY)',
+    '',
+    'When coordinating a swarm, you MUST monitor workers and review their output.',
+    '',
+    '### Monitor Loop',
+    '',
+    '```',
+    '┌─────────────────────────────────────────────────────────────┐',
+    '│                 COORDINATOR MONITOR LOOP                    │',
+    '├─────────────────────────────────────────────────────────────┤',
+    '│                                                             │',
+    '│  1. CHECK INBOX                                             │',
+    '│     swarmmail_inbox()                                       │',
+    '│     swarmmail_read_message(message_id=N)                    │',
+    '│                                                             │',
+    '│  2. CHECK STATUS                                            │',
+    '│     swarm_status(epic_id, project_key)                      │',
+    '│                                                             │',
+    '│  3. REVIEW COMPLETED WORK                                   │',
+    '│     swarm_review(project_key, epic_id, task_id, files)      │',
+    '│     → Generates review prompt with epic context + diff      │',
+    '│                                                             │',
+    '│  4. SEND FEEDBACK                                           │',
+    '│     swarm_review_feedback(                                  │',
+    '│       project_key, task_id, worker_id,                      │',
+    '│       status="approved|needs_changes",                      │',
+    '│       issues="[{file, line, issue, suggestion}]"            │',
+    '│     )                                                       │',
+    '│                                                             │',
+    '│  5. INTERVENE IF NEEDED                                     │',
+    '│     - Blocked >5min → unblock or reassign                   │',
+    '│     - File conflicts → mediate                              │',
+    '│     - Scope creep → approve or reject                       │',
+    '│     - 3 review failures → escalate to human                 │',
+    '│                                                             │',
+    '└─────────────────────────────────────────────────────────────┘',
+    '```',
+    '',
+    '### Review Tools',
+    '',
+    '| Tool | Purpose |',
+    '|------|---------|',
+    '| `swarm_review` | Generate review prompt with epic context, dependencies, and git diff |',
+    '| `swarm_review_feedback` | Send approval/rejection to worker (tracks 3-strike rule) |',
+    '',
+    '### Review Criteria',
+    '',
+    '- Does work fulfill subtask requirements?',
+    '- Does it serve the overall epic goal?',
+    '- Does it enable downstream tasks?',
+    '- Type safety, no obvious bugs?',
+    '',
+    '### 3-Strike Rule',
+    '',
+    'After 3 review rejections, task is marked **blocked**. This signals an architectural problem, not "try harder."',
+    '',
+    '**NEVER skip the review step.** Workers complete faster when they get feedback.',
   ].join(newline);
 }
 
@@ -1291,8 +1264,8 @@ function updateAgentsToolPreferencesBlock(
   newline: string,
 ): { content: string; changed: boolean } {
   const lower = content.toLowerCase();
-  const openTag = "<tool_preferences>";
-  const closeTag = "</tool_preferences>";
+  const openTag = '<tool_preferences>';
+  const closeTag = '</tool_preferences>';
   const openIdx = lower.indexOf(openTag);
   const closeIdx = lower.indexOf(closeTag);
 
@@ -1315,31 +1288,29 @@ function updateAgentsToolPreferencesBlock(
     /cass_view/i.test(block) &&
     /cass_expand/i.test(block);
   const hasSemanticTools =
-    /semantic-memory_find/i.test(block) &&
-    /semantic-memory_store/i.test(block);
+    /semantic-memory_find/i.test(block) && /semantic-memory_store/i.test(block);
   const hasSwarmReviewTools =
-    /swarm_review\b/i.test(block) &&
-    /swarm_review_feedback/i.test(block);
+    /swarm_review\b/i.test(block) && /swarm_review_feedback/i.test(block);
 
   const linesToAdd: string[] = [];
   if (!hasSkillsTools) {
     linesToAdd.push(
-      "- **skills_list, skills_use, skills_read** - Knowledge injection (load reusable skills)",
+      '- **skills_list, skills_use, skills_read** - Knowledge injection (load reusable skills)',
     );
   }
   if (!hasCassTools) {
     linesToAdd.push(
-      "- **cass_search, cass_view, cass_expand** - Search past agent sessions",
+      '- **cass_search, cass_view, cass_expand** - Search past agent sessions',
     );
   }
   if (!hasSemanticTools) {
     linesToAdd.push(
-      "- **semantic-memory_find, semantic-memory_store, semantic-memory_validate** - Persistent learning across sessions",
+      '- **semantic-memory_find, semantic-memory_store, semantic-memory_validate** - Persistent learning across sessions',
     );
   }
   if (!hasSwarmReviewTools) {
     linesToAdd.push(
-      "- **swarm_review, swarm_review_feedback** - Coordinator reviews worker output (3-strike rule)",
+      '- **swarm_review, swarm_review_feedback** - Coordinator reviews worker output (3-strike rule)',
     );
   }
 
@@ -1387,53 +1358,86 @@ function updateAgentsMdContent({
     `**Bundled:** ${bundledSkillsCsv}`,
   );
   if (updated !== beforeBundled) {
-    changes.push("Updated bundled skills list");
+    changes.push('Updated bundled skills list');
   }
 
   // ADR-011: Migrate old tool names to hivemind
-  const hasOldCassTools = /cass_search\(|cass_view\(|cass_expand\(/i.test(updated);
-  const hasOldSemanticTools = /semantic-memory_store\(|semantic-memory_find\(/i.test(updated);
+  const hasOldCassTools = /cass_search\(|cass_view\(|cass_expand\(/i.test(
+    updated,
+  );
+  const hasOldSemanticTools =
+    /semantic-memory_store\(|semantic-memory_find\(/i.test(updated);
   const hasHivemindTools = /hivemind_store\(|hivemind_find\(/i.test(updated);
-  
+
   // If has old tools but not new hivemind tools, we need to update
   if ((hasOldCassTools || hasOldSemanticTools) && !hasHivemindTools) {
     // Replace old tool references with hivemind equivalents
     const beforeMigration = updated;
-    
+
     // Tool name replacements
-    updated = updated.replace(/semantic-memory_store\(/g, "hivemind_store(");
-    updated = updated.replace(/semantic-memory_find\(/g, "hivemind_find(");
-    updated = updated.replace(/semantic-memory_get\(/g, "hivemind_get(");
-    updated = updated.replace(/semantic-memory_remove\(/g, "hivemind_remove(");
-    updated = updated.replace(/semantic-memory_validate\(/g, "hivemind_validate(");
-    updated = updated.replace(/semantic-memory_list\(/g, "hivemind_find(");
-    updated = updated.replace(/semantic-memory_stats\(/g, "hivemind_stats(");
-    updated = updated.replace(/cass_search\(/g, "hivemind_find(");
-    updated = updated.replace(/cass_view\(/g, "hivemind_get(");
-    updated = updated.replace(/cass_expand\(/g, "hivemind_get(");
-    updated = updated.replace(/cass_health\(/g, "hivemind_stats(");
-    updated = updated.replace(/cass_index\(/g, "hivemind_index(");
-    updated = updated.replace(/cass_stats\(/g, "hivemind_stats(");
-    
+    updated = updated.replace(/semantic-memory_store\(/g, 'hivemind_store(');
+    updated = updated.replace(/semantic-memory_find\(/g, 'hivemind_find(');
+    updated = updated.replace(/semantic-memory_get\(/g, 'hivemind_get(');
+    updated = updated.replace(/semantic-memory_remove\(/g, 'hivemind_remove(');
+    updated = updated.replace(
+      /semantic-memory_validate\(/g,
+      'hivemind_validate(',
+    );
+    updated = updated.replace(/semantic-memory_list\(/g, 'hivemind_find(');
+    updated = updated.replace(/semantic-memory_stats\(/g, 'hivemind_stats(');
+    updated = updated.replace(/cass_search\(/g, 'hivemind_find(');
+    updated = updated.replace(/cass_view\(/g, 'hivemind_get(');
+    updated = updated.replace(/cass_expand\(/g, 'hivemind_get(');
+    updated = updated.replace(/cass_health\(/g, 'hivemind_stats(');
+    updated = updated.replace(/cass_index\(/g, 'hivemind_index(');
+    updated = updated.replace(/cass_stats\(/g, 'hivemind_stats(');
+
     // Table references (without parentheses)
-    updated = updated.replace(/\| `semantic-memory_store` \|/g, "| `hivemind_store` |");
-    updated = updated.replace(/\| `semantic-memory_find` \|/g, "| `hivemind_find` |");
-    updated = updated.replace(/\| `semantic-memory_get` \|/g, "| `hivemind_get` |");
-    updated = updated.replace(/\| `semantic-memory_remove` \|/g, "| `hivemind_remove` |");
-    updated = updated.replace(/\| `semantic-memory_validate` \|/g, "| `hivemind_validate` |");
-    updated = updated.replace(/\| `semantic-memory_list` \|/g, "| `hivemind_find` |");
-    updated = updated.replace(/\| `semantic-memory_stats` \|/g, "| `hivemind_stats` |");
-    updated = updated.replace(/\| `semantic-memory_migrate` \|/g, "| `hivemind_stats` |");
-    updated = updated.replace(/\| `semantic-memory_check` \|/g, "| `hivemind_stats` |");
-    updated = updated.replace(/\| `cass_search` \|/g, "| `hivemind_find` |");
-    updated = updated.replace(/\| `cass_view` \|/g, "| `hivemind_get` |");
-    updated = updated.replace(/\| `cass_expand` \|/g, "| `hivemind_get` |");
-    updated = updated.replace(/\| `cass_health` \|/g, "| `hivemind_stats` |");
-    updated = updated.replace(/\| `cass_index` \|/g, "| `hivemind_index` |");
-    updated = updated.replace(/\| `cass_stats` \|/g, "| `hivemind_stats` |");
-    
+    updated = updated.replace(
+      /\| `semantic-memory_store` \|/g,
+      '| `hivemind_store` |',
+    );
+    updated = updated.replace(
+      /\| `semantic-memory_find` \|/g,
+      '| `hivemind_find` |',
+    );
+    updated = updated.replace(
+      /\| `semantic-memory_get` \|/g,
+      '| `hivemind_get` |',
+    );
+    updated = updated.replace(
+      /\| `semantic-memory_remove` \|/g,
+      '| `hivemind_remove` |',
+    );
+    updated = updated.replace(
+      /\| `semantic-memory_validate` \|/g,
+      '| `hivemind_validate` |',
+    );
+    updated = updated.replace(
+      /\| `semantic-memory_list` \|/g,
+      '| `hivemind_find` |',
+    );
+    updated = updated.replace(
+      /\| `semantic-memory_stats` \|/g,
+      '| `hivemind_stats` |',
+    );
+    updated = updated.replace(
+      /\| `semantic-memory_migrate` \|/g,
+      '| `hivemind_stats` |',
+    );
+    updated = updated.replace(
+      /\| `semantic-memory_check` \|/g,
+      '| `hivemind_stats` |',
+    );
+    updated = updated.replace(/\| `cass_search` \|/g, '| `hivemind_find` |');
+    updated = updated.replace(/\| `cass_view` \|/g, '| `hivemind_get` |');
+    updated = updated.replace(/\| `cass_expand` \|/g, '| `hivemind_get` |');
+    updated = updated.replace(/\| `cass_health` \|/g, '| `hivemind_stats` |');
+    updated = updated.replace(/\| `cass_index` \|/g, '| `hivemind_index` |');
+    updated = updated.replace(/\| `cass_stats` \|/g, '| `hivemind_stats` |');
+
     if (updated !== beforeMigration) {
-      changes.push("Migrated cass_*/semantic-memory_* to hivemind_* (ADR-011)");
+      changes.push('Migrated cass_*/semantic-memory_* to hivemind_* (ADR-011)');
     }
   }
 
@@ -1441,7 +1445,7 @@ function updateAgentsMdContent({
   const toolPrefsResult = updateAgentsToolPreferencesBlock(updated, newline);
   if (toolPrefsResult.changed) {
     updated = toolPrefsResult.content;
-    changes.push("Updated tool_preferences tool list");
+    changes.push('Updated tool_preferences tool list');
   }
 
   // Check for sections - now unified under Hivemind
@@ -1456,28 +1460,26 @@ function updateAgentsMdContent({
 
   const sectionsToAppend: string[] = [];
   if (!hasSkillsSection) {
-    sectionsToAppend.push(
-      buildAgentsSkillsSection(bundledSkillsCsv, newline),
-    );
-    changes.push("Added Skills section");
+    sectionsToAppend.push(buildAgentsSkillsSection(bundledSkillsCsv, newline));
+    changes.push('Added Skills section');
   }
   if (!hasHivemindSection) {
     sectionsToAppend.push(buildAgentsHivemindSection(newline));
-    changes.push("Added Hivemind section (unified memory)");
+    changes.push('Added Hivemind section (unified memory)');
   }
   if (!hasSwarmCoordinatorSection) {
     sectionsToAppend.push(buildAgentsSwarmCoordinatorSection(newline));
-    changes.push("Added Swarm Coordinator Checklist section");
+    changes.push('Added Swarm Coordinator Checklist section');
   }
 
   if (sectionsToAppend.length > 0) {
-    const trimmed = updated.replace(/\s+$/g, "");
+    const trimmed = updated.replace(/\s+$/g, '');
     const needsRule = !/^\s*---\s*$/m.test(trimmed.slice(-3000));
     updated =
       trimmed +
       newline +
       newline +
-      (needsRule ? `---${newline}${newline}` : "") +
+      (needsRule ? `---${newline}${newline}` : '') +
       sectionsToAppend.join(newline + newline);
   }
 
@@ -1496,18 +1498,18 @@ function updateAgentsMdFile({
   agentsPath: string;
   bundledSkillsCsv: string;
 }): { changed: boolean; backupPath?: string; changes: string[] } {
-  const original = readFileSync(agentsPath, "utf-8");
+  const original = readFileSync(agentsPath, 'utf-8');
   const { updated, changed, changes } = updateAgentsMdContent({
     content: original,
     bundledSkillsCsv,
   });
 
   if (!changed) {
-    return { changed: false, changes: ["No changes needed"] };
+    return { changed: false, changes: ['No changes needed'] };
   }
 
   const backupPath = backupFileWithTimestamp(agentsPath) || undefined;
-  writeFileSync(agentsPath, updated, "utf-8");
+  writeFileSync(agentsPath, updated, 'utf-8');
   return { changed: true, backupPath, changes };
 }
 
@@ -1524,12 +1526,12 @@ function updateAgentsMdFile({
 function getPluginWrapper(): string {
   const templatePath = join(
     __dirname,
-    "..",
-    "examples",
-    "plugin-wrapper-template.ts",
+    '..',
+    'examples',
+    'plugin-wrapper-template.ts',
   );
   try {
-    return readFileSync(templatePath, "utf-8");
+    return readFileSync(templatePath, 'utf-8');
   } catch (error) {
     // Fallback to minimal wrapper if template not found (shouldn't happen in normal install)
     console.warn(
@@ -1546,7 +1548,7 @@ const SWARM_COMMAND = `---
 description: Decompose task into parallel subtasks and coordinate agents
 ---
 
-${formatCoordinatorPrompt({ task: "$ARGUMENTS", projectPath: "$PWD" })}`;
+${formatCoordinatorPrompt({ task: '$ARGUMENTS', projectPath: '$PWD' })}`;
 
 const getPlannerAgent = (model: string) => `---
 name: swarm-planner
@@ -1913,85 +1915,93 @@ Begin by executing Step 1 (swarmmail_init).
  */
 function getFixCommand(dep: Dependency): string | null {
   const platform = process.platform;
-  
+
   switch (dep.name) {
-    case "OpenCode":
+    case 'OpenCode':
       // Show platform-appropriate suggestions
-      if (platform === "win32") {
-        return "choco install opencode  OR  scoop bucket add extras && scoop install extras/opencode  OR  npm install -g opencode-ai";
+      if (platform === 'win32') {
+        return 'choco install opencode  OR  scoop bucket add extras && scoop install extras/opencode  OR  npm install -g opencode-ai';
       } else {
-        return "curl -fsSL https://opencode.ai/install | bash  OR  brew install opencode  OR  npm install -g opencode-ai";
+        return 'curl -fsSL https://opencode.ai/install | bash  OR  brew install opencode  OR  npm install -g opencode-ai';
       }
-    case "Ollama":
-      if (platform === "win32") {
-        return "See: https://ollama.ai/download (then: ollama pull mxbai-embed-large)";
+    case 'Ollama':
+      if (platform === 'win32') {
+        return 'See: https://ollama.ai/download (then: ollama pull mxbai-embed-large)';
       }
-      return "brew install ollama && ollama pull mxbai-embed-large";
-    case "CASS (Coding Agent Session Search)":
-      return "See: https://github.com/Dicklesworthstone/coding_agent_session_search";
-    case "UBS (Ultimate Bug Scanner)":
-      return "See: https://github.com/Dicklesworthstone/ultimate_bug_scanner";
+      return 'brew install ollama && ollama pull mxbai-embed-large';
+    case 'CASS (Coding Agent Session Search)':
+      return 'See: https://github.com/Dicklesworthstone/coding_agent_session_search';
+    case 'UBS (Ultimate Bug Scanner)':
+      return 'See: https://github.com/Dicklesworthstone/ultimate_bug_scanner';
     default:
       // Fallback to generic install command if available
-      return dep.installType !== "manual" ? dep.install : null;
+      return dep.installType !== 'manual' ? dep.install : null;
   }
 }
 
 async function doctor(debug = false) {
-  p.intro("swarm doctor v" + VERSION);
+  p.intro('swarm doctor v' + VERSION);
 
   if (debug) {
-    p.log.step("Debug info:");
-    p.log.message(dim(`  Runtime: ${typeof Bun !== 'undefined' ? 'Bun' : 'Node.js'}`));
+    p.log.step('Debug info:');
+    p.log.message(
+      dim(`  Runtime: ${typeof Bun !== 'undefined' ? 'Bun' : 'Node.js'}`),
+    );
     p.log.message(dim(`  Node version: ${process.version}`));
     p.log.message(dim(`  Platform: ${process.platform}`));
     p.log.message(dim(`  Arch: ${process.arch}`));
     p.log.message(dim(`  CWD: ${process.cwd()}`));
-    p.log.message(dim(`  PATH entries: ${(process.env.PATH || '').split(':').length}`));
+    p.log.message(
+      dim(`  PATH entries: ${(process.env.PATH || '').split(':').length}`),
+    );
   }
 
   const s = p.spinner();
-  s.start("Checking dependencies...");
+  s.start('Checking dependencies...');
 
   const results = await checkAllDependencies();
 
-  s.stop("Dependencies checked");
-  
+  s.stop('Dependencies checked');
+
   if (debug) {
-    p.log.step("Dependency check details:");
+    p.log.step('Dependency check details:');
     for (const { dep, available, version } of results) {
-      const status = available ? green("✓") : red("✗");
-      p.log.message(dim(`  ${status} ${dep.command} ${dep.checkArgs.join(" ")} → ${available ? `v${version || "unknown"}` : "not found"}`));
+      const status = available ? green('✓') : red('✗');
+      p.log.message(
+        dim(
+          `  ${status} ${dep.command} ${dep.checkArgs.join(' ')} → ${available ? `v${version || 'unknown'}` : 'not found'}`,
+        ),
+      );
     }
   }
 
   const required = results.filter((r) => r.dep.required);
   const optional = results.filter((r) => !r.dep.required);
 
-  p.log.step("Required dependencies:");
+  p.log.step('Required dependencies:');
   for (const { dep, available, version } of required) {
     if (available) {
-      p.log.success(dep.name + (version ? " v" + version : ""));
+      p.log.success(dep.name + (version ? ' v' + version : ''));
     } else {
-      p.log.error(dep.name + " - not found");
+      p.log.error(dep.name + ' - not found');
       const fixCmd = getFixCommand(dep);
       if (fixCmd) {
-        p.log.message(dim("   └─ Fix: " + fixCmd));
+        p.log.message(dim('   └─ Fix: ' + fixCmd));
       }
     }
   }
 
-  p.log.step("Optional dependencies:");
+  p.log.step('Optional dependencies:');
   for (const { dep, available, version } of optional) {
     if (available) {
       p.log.success(
-        dep.name + (version ? " v" + version : "") + " - " + dep.description,
+        dep.name + (version ? ' v' + version : '') + ' - ' + dep.description,
       );
     } else {
-      p.log.warn(dep.name + " - not found (" + dep.description + ")");
+      p.log.warn(dep.name + ' - not found (' + dep.description + ')');
       const fixCmd = getFixCommand(dep);
       if (fixCmd) {
-        p.log.message(dim("   └─ Fix: " + fixCmd));
+        p.log.message(dim('   └─ Fix: ' + fixCmd));
       }
     }
   }
@@ -2000,25 +2010,25 @@ async function doctor(debug = false) {
   const optionalMissing = optional.filter((r) => !r.available);
 
   // Check skills
-  p.log.step("Skills:");
-  const configDir = join(homedir(), ".config", "opencode");
-  const globalSkillsPath = join(configDir, "skills");
-  const bundledSkillsPath = join(__dirname, "..", "global-skills");
+  p.log.step('Skills:');
+  const configDir = join(homedir(), '.config', 'opencode');
+  const globalSkillsPath = join(configDir, 'skills');
+  const bundledSkillsPath = join(__dirname, '..', 'global-skills');
 
   // Global skills directory
   if (existsSync(globalSkillsPath)) {
     try {
-      const { readdirSync } = require("fs");
+      const { readdirSync } = require('fs');
       const skills = readdirSync(globalSkillsPath, { withFileTypes: true })
         .filter((d: { isDirectory: () => boolean }) => d.isDirectory())
         .map((d: { name: string }) => d.name);
       if (skills.length > 0) {
-        p.log.success(`Global skills (${skills.length}): ${skills.join(", ")}`);
+        p.log.success(`Global skills (${skills.length}): ${skills.join(', ')}`);
       } else {
-        p.log.warn("Global skills directory exists but is empty");
+        p.log.warn('Global skills directory exists but is empty');
       }
     } catch {
-      p.log.warn("Global skills directory: " + globalSkillsPath);
+      p.log.warn('Global skills directory: ' + globalSkillsPath);
     }
   } else {
     p.log.warn("No global skills directory (run 'swarm setup' to create)");
@@ -2027,31 +2037,31 @@ async function doctor(debug = false) {
   // Bundled skills
   if (existsSync(bundledSkillsPath)) {
     try {
-      const { readdirSync } = require("fs");
+      const { readdirSync } = require('fs');
       const bundled = readdirSync(bundledSkillsPath, { withFileTypes: true })
         .filter((d: { isDirectory: () => boolean }) => d.isDirectory())
         .map((d: { name: string }) => d.name);
       p.log.success(
-        `Bundled skills (${bundled.length}): ${bundled.join(", ")}`,
+        `Bundled skills (${bundled.length}): ${bundled.join(', ')}`,
       );
     } catch {
-      p.log.warn("Could not read bundled skills");
+      p.log.warn('Could not read bundled skills');
     }
   }
 
   // Project skills (check current directory)
   // OpenCode uses singular "skill", Claude uses plural "skills"
-  const projectSkillsDirs = [".opencode/skill", ".claude/skills", "skill"];
+  const projectSkillsDirs = ['.opencode/skill', '.claude/skills', 'skill'];
   for (const dir of projectSkillsDirs) {
     if (existsSync(dir)) {
       try {
-        const { readdirSync } = require("fs");
+        const { readdirSync } = require('fs');
         const skills = readdirSync(dir, { withFileTypes: true })
           .filter((d: { isDirectory: () => boolean }) => d.isDirectory())
           .map((d: { name: string }) => d.name);
         if (skills.length > 0) {
           p.log.success(
-            `Project skills in ${dir}/ (${skills.length}): ${skills.join(", ")}`,
+            `Project skills in ${dir}/ (${skills.length}): ${skills.join(', ')}`,
           );
         }
       } catch {
@@ -2062,24 +2072,20 @@ async function doctor(debug = false) {
 
   if (requiredMissing.length > 0) {
     p.outro(
-      "Missing " +
+      'Missing ' +
         requiredMissing.length +
         " required dependencies. Run 'swarm setup' to install.",
     );
     process.exit(1);
   } else if (optionalMissing.length > 0) {
     p.outro(
-      "All required dependencies installed. " +
+      'All required dependencies installed. ' +
         optionalMissing.length +
-        " optional missing.",
+        ' optional missing.',
     );
   } else {
-    p.outro("All dependencies installed!");
+    p.outro('All dependencies installed!');
   }
-
-  // Check for updates (non-blocking)
-  const updateInfo = await checkForUpdates();
-  if (updateInfo) showUpdateNotification(updateInfo);
 }
 
 async function setup(forceReinstall = false, nonInteractive = false) {
@@ -2087,23 +2093,25 @@ async function setup(forceReinstall = false, nonInteractive = false) {
   console.log(yellow(BANNER));
   console.log(getDecoratedBee());
   console.log();
-  console.log(magenta("  " + getRandomMessage()));
+  console.log(magenta('  ' + getRandomMessage()));
   console.log();
 
-  p.intro("opencode-swarm-plugin v" + VERSION);
+  p.intro('opencode-swarm-plugin v' + VERSION);
 
   // CRITICAL: Check for Bun first - the CLI requires Bun runtime
-  const bunCheck = await checkCommand("bun", ["--version"]);
+  const bunCheck = await checkCommand('bun', ['--version']);
   if (!bunCheck.available) {
-    p.log.error("Bun is required but not installed!");
+    p.log.error('Bun is required but not installed!');
     console.log();
-    console.log(dim("  The swarm CLI requires Bun runtime for Bun-specific APIs."));
+    console.log(
+      dim('  The swarm CLI requires Bun runtime for Bun-specific APIs.'),
+    );
     console.log();
-    console.log("  Install Bun:");
-    console.log(cyan("    curl -fsSL https://bun.sh/install | bash"));
+    console.log('  Install Bun:');
+    console.log(cyan('    curl -fsSL https://bun.sh/install | bash'));
     console.log();
-    console.log(dim("  Or via Homebrew:"));
-    console.log(cyan("    brew install oven-sh/bun/bun"));
+    console.log(dim('  Or via Homebrew:'));
+    console.log(cyan('    brew install oven-sh/bun/bun'));
     console.log();
     process.exit(1);
   }
@@ -2113,13 +2121,13 @@ async function setup(forceReinstall = false, nonInteractive = false) {
   const cwd = process.cwd();
   const tempDirName = getLibSQLProjectTempDirName(cwd);
   const tempDir = join(tmpdir(), tempDirName);
-  const pglitePath = join(tempDir, "streams");
-  const libsqlPath = join(tempDir, "streams.db");
-  
+  const pglitePath = join(tempDir, 'streams');
+  const libsqlPath = join(tempDir, 'streams.db');
+
   if (pgliteExists(pglitePath)) {
     const migrateSpinner = p.spinner();
-    migrateSpinner.start("Migrating...");
-    
+    migrateSpinner.start('Migrating...');
+
     try {
       const result = await migratePGliteToLibSQL({
         pglitePath,
@@ -2127,19 +2135,21 @@ async function setup(forceReinstall = false, nonInteractive = false) {
         dryRun: false,
         onProgress: () => {},
       });
-      
+
       const total = result.memories.migrated + result.beads.migrated;
       if (total > 0) {
-        migrateSpinner.stop(`Migrated ${result.memories.migrated} memories, ${result.beads.migrated} cells`);
+        migrateSpinner.stop(
+          `Migrated ${result.memories.migrated} memories, ${result.beads.migrated} cells`,
+        );
       } else {
-        migrateSpinner.stop("Migrated");
+        migrateSpinner.stop('Migrated');
       }
-      
+
       if (result.errors.length > 0) {
         p.log.warn(`${result.errors.length} errors during migration`);
       }
     } catch (error) {
-      migrateSpinner.stop("Migration failed");
+      migrateSpinner.stop('Migration failed');
       p.log.error(error instanceof Error ? error.message : String(error));
     }
   }
@@ -2147,23 +2157,23 @@ async function setup(forceReinstall = false, nonInteractive = false) {
   let isReinstall = false;
 
   // Check if already configured
-  p.log.step("Checking existing configuration...");
-  const configDir = join(homedir(), ".config", "opencode");
-  const pluginDir = join(configDir, "plugin");
-  const commandDir = join(configDir, "command");
-  const agentDir = join(configDir, "agent");
+  p.log.step('Checking existing configuration...');
+  const configDir = join(homedir(), '.config', 'opencode');
+  const pluginDir = join(configDir, 'plugin');
+  const commandDir = join(configDir, 'command');
+  const agentDir = join(configDir, 'agent');
 
-  const pluginPath = join(pluginDir, "swarm.ts");
-  const commandPath = join(commandDir, "swarm.md");
+  const pluginPath = join(pluginDir, 'swarm.ts');
+  const commandPath = join(commandDir, 'swarm.md');
   // OpenCode expects flat agent paths with hyphens (swarm-worker.md), not nested (swarm/worker.md)
-  const plannerAgentPath = join(agentDir, "swarm-planner.md");
-  const workerAgentPath = join(agentDir, "swarm-worker.md");
-  const researcherAgentPath = join(agentDir, "swarm-researcher.md");
+  const plannerAgentPath = join(agentDir, 'swarm-planner.md');
+  const workerAgentPath = join(agentDir, 'swarm-worker.md');
+  const researcherAgentPath = join(agentDir, 'swarm-researcher.md');
   // Legacy nested paths (for detection/cleanup)
-  const swarmAgentDir = join(agentDir, "swarm");
-  const legacyPlannerPath = join(swarmAgentDir, "planner.md");
-  const legacyWorkerPath = join(swarmAgentDir, "worker.md");
-  const legacyResearcherPath = join(swarmAgentDir, "researcher.md");
+  const swarmAgentDir = join(agentDir, 'swarm');
+  const legacyPlannerPath = join(swarmAgentDir, 'planner.md');
+  const legacyWorkerPath = join(swarmAgentDir, 'worker.md');
+  const legacyResearcherPath = join(swarmAgentDir, 'researcher.md');
 
   const existingFiles = [
     pluginPath,
@@ -2177,65 +2187,69 @@ async function setup(forceReinstall = false, nonInteractive = false) {
   ].filter((f) => existsSync(f));
 
   if (existingFiles.length > 0 && !forceReinstall) {
-    p.log.success("Swarm is already configured!");
-    p.log.message(dim("  Found " + existingFiles.length + "/5 config files"));
+    p.log.success('Swarm is already configured!');
+    p.log.message(dim('  Found ' + existingFiles.length + '/5 config files'));
 
     const action = await p.select({
-      message: "What would you like to do?",
+      message: 'What would you like to do?',
       options: [
         {
-          value: "skip",
-          label: "Keep existing config",
-          hint: "Exit without changes",
+          value: 'skip',
+          label: 'Keep existing config',
+          hint: 'Exit without changes',
         },
         {
-          value: "models",
-          label: "Update agent models",
-          hint: "Keep customizations, just change models",
+          value: 'models',
+          label: 'Update agent models',
+          hint: 'Keep customizations, just change models',
         },
         {
-          value: "reinstall",
-          label: "Reinstall everything",
-          hint: "Check deps, sync bundled skills, regenerate config files",
+          value: 'reinstall',
+          label: 'Reinstall everything',
+          hint: 'Check deps, sync bundled skills, regenerate config files',
         },
       ],
     });
 
-    if (p.isCancel(action) || action === "skip") {
+    if (p.isCancel(action) || action === 'skip') {
       p.outro("Config unchanged. Run 'swarm config' to see file locations.");
       return;
     }
 
-    if (action === "models") {
+    if (action === 'models') {
       // Quick model update flow
       const coordinatorModel = await p.select({
-        message: "Select coordinator model:",
+        message: 'Select coordinator model:',
         options: COORDINATOR_MODELS,
-        initialValue: "anthropic/claude-sonnet-4-5",
+        initialValue: 'anthropic/claude-sonnet-4-5',
       });
 
       if (p.isCancel(coordinatorModel)) {
-        p.cancel("Setup cancelled");
+        p.cancel('Setup cancelled');
         process.exit(0);
       }
 
       const workerModel = await p.select({
-        message: "Select worker model:",
+        message: 'Select worker model:',
         options: WORKER_MODELS,
-        initialValue: "anthropic/claude-haiku-4-5",
+        initialValue: 'anthropic/claude-haiku-4-5',
       });
 
       if (p.isCancel(workerModel)) {
-        p.cancel("Setup cancelled");
+        p.cancel('Setup cancelled');
         process.exit(0);
       }
 
       // Update model lines in agent files (check both nested and legacy paths)
-      const plannerPaths = [plannerAgentPath, legacyPlannerPath].filter(existsSync);
-      const workerPaths = [workerAgentPath, legacyWorkerPath].filter(existsSync);
+      const plannerPaths = [plannerAgentPath, legacyPlannerPath].filter(
+        existsSync,
+      );
+      const workerPaths = [workerAgentPath, legacyWorkerPath].filter(
+        existsSync,
+      );
 
       for (const path of plannerPaths) {
-        const content = readFileSync(path, "utf-8");
+        const content = readFileSync(path, 'utf-8');
         const updated = content.replace(
           /^model: .+$/m,
           `model: ${coordinatorModel}`,
@@ -2243,11 +2257,11 @@ async function setup(forceReinstall = false, nonInteractive = false) {
         writeFileSync(path, updated);
       }
       if (plannerPaths.length > 0) {
-        p.log.success("Planner: " + coordinatorModel);
+        p.log.success('Planner: ' + coordinatorModel);
       }
 
       for (const path of workerPaths) {
-        const content = readFileSync(path, "utf-8");
+        const content = readFileSync(path, 'utf-8');
         const updated = content.replace(
           /^model: .+$/m,
           `model: ${workerModel}`,
@@ -2255,27 +2269,31 @@ async function setup(forceReinstall = false, nonInteractive = false) {
         writeFileSync(path, updated);
       }
       if (workerPaths.length > 0) {
-        p.log.success("Worker: " + workerModel);
+        p.log.success('Worker: ' + workerModel);
       }
 
-      p.outro("Models updated! Your customizations are preserved.");
+      p.outro('Models updated! Your customizations are preserved.');
       return;
     }
-    if (action === "reinstall") {
+    if (action === 'reinstall') {
       isReinstall = true;
-      p.log.step("Reinstalling swarm configuration...");
-      p.log.message(dim("  This will check dependencies, sync skills, and update config files"));
+      p.log.step('Reinstalling swarm configuration...');
+      p.log.message(
+        dim(
+          '  This will check dependencies, sync skills, and update config files',
+        ),
+      );
     }
     // action === "reinstall" - fall through to full setup
   }
 
   // Full setup flow
   const s = p.spinner();
-  s.start("Checking dependencies...");
+  s.start('Checking dependencies...');
 
   const results = await checkAllDependencies();
 
-  s.stop("Dependencies checked");
+  s.stop('Dependencies checked');
 
   const required = results.filter((r) => r.dep.required);
   const optional = results.filter((r) => !r.dep.required);
@@ -2286,23 +2304,23 @@ async function setup(forceReinstall = false, nonInteractive = false) {
     if (available) {
       p.log.success(dep.name);
     } else if (dep.required) {
-      p.log.error(dep.name + " (required)");
+      p.log.error(dep.name + ' (required)');
     } else {
-      p.log.warn(dep.name + " (optional)");
+      p.log.warn(dep.name + ' (optional)');
     }
   }
 
   if (requiredMissing.length > 0) {
-    p.log.step("Missing " + requiredMissing.length + " required dependencies");
+    p.log.step('Missing ' + requiredMissing.length + ' required dependencies');
 
     for (const { dep } of requiredMissing) {
       const shouldInstall = await p.confirm({
-        message: "Install " + dep.name + "? (" + dep.description + ")",
+        message: 'Install ' + dep.name + '? (' + dep.description + ')',
         initialValue: true,
       });
 
       if (p.isCancel(shouldInstall)) {
-        p.cancel("Setup cancelled");
+        p.cancel('Setup cancelled');
         process.exit(0);
       }
 
@@ -2311,46 +2329,59 @@ async function setup(forceReinstall = false, nonInteractive = false) {
         if (dep.installMethods && dep.installMethods.length > 0) {
           // Detect available methods on this system
           const detectSpinner = p.spinner();
-          detectSpinner.start("Detecting available installation methods...");
-          const availableMethods = await getAvailableInstallMethods(dep.installMethods);
-          detectSpinner.stop(`Found ${availableMethods.length} installation method(s)`);
+          detectSpinner.start('Detecting available installation methods...');
+          const availableMethods = await getAvailableInstallMethods(
+            dep.installMethods,
+          );
+          detectSpinner.stop(
+            `Found ${availableMethods.length} installation method(s)`,
+          );
 
           // Prompt user to select method
-          const selectedMethod = await promptInstallMethod(dep, availableMethods);
-          
+          const selectedMethod = await promptInstallMethod(
+            dep,
+            availableMethods,
+          );
+
           if (!selectedMethod) {
-            p.log.warn("Skipping " + dep.name + " - no installation method selected");
+            p.log.warn(
+              'Skipping ' + dep.name + ' - no installation method selected',
+            );
             continue;
           }
 
           const installSpinner = p.spinner();
-          installSpinner.start(`Installing ${dep.name} via ${selectedMethod.name}...`);
+          installSpinner.start(
+            `Installing ${dep.name} via ${selectedMethod.name}...`,
+          );
 
           const success = await runInstall(selectedMethod.command);
 
           if (success) {
-            installSpinner.stop(dep.name + " installed");
+            installSpinner.stop(dep.name + ' installed');
           } else {
-            installSpinner.stop("Failed to install " + dep.name);
-            p.log.error("Command failed: " + selectedMethod.command);
-            p.log.message(dim("  Try running the command manually in your terminal"));
+            installSpinner.stop('Failed to install ' + dep.name);
+            p.log.error('Command failed: ' + selectedMethod.command);
+            p.log.message(
+              dim('  Try running the command manually in your terminal'),
+            );
           }
         } else {
           // Fallback to single install command
           const installSpinner = p.spinner();
-          installSpinner.start("Installing " + dep.name + "...");
+          installSpinner.start('Installing ' + dep.name + '...');
 
           const success = await runInstall(dep.install);
 
           if (success) {
-            installSpinner.stop(dep.name + " installed");
+            installSpinner.stop(dep.name + ' installed');
           } else {
-            installSpinner.stop("Failed to install " + dep.name);
-            p.log.error("Manual install: " + dep.install);
+            installSpinner.stop('Failed to install ' + dep.name);
+            p.log.error('Manual install: ' + dep.install);
           }
         }
       } else {
-        p.log.warn("Skipping " + dep.name + " - swarm may not work correctly");
+        p.log.warn('Skipping ' + dep.name + ' - swarm may not work correctly');
       }
     }
   }
@@ -2358,12 +2389,12 @@ async function setup(forceReinstall = false, nonInteractive = false) {
   // Only prompt for optional deps if there are missing ones (skip in non-interactive mode)
   if (optionalMissing.length > 0 && !nonInteractive) {
     const installable = optionalMissing.filter(
-      (r) => r.dep.installType !== "manual",
+      (r) => r.dep.installType !== 'manual',
     );
 
     if (installable.length > 0) {
       const toInstall = await p.multiselect({
-        message: "Install optional dependencies?",
+        message: 'Install optional dependencies?',
         options: installable.map(({ dep }) => ({
           value: dep.name,
           label: dep.name,
@@ -2373,7 +2404,7 @@ async function setup(forceReinstall = false, nonInteractive = false) {
       });
 
       if (p.isCancel(toInstall)) {
-        p.cancel("Setup cancelled");
+        p.cancel('Setup cancelled');
         process.exit(0);
       }
 
@@ -2381,120 +2412,128 @@ async function setup(forceReinstall = false, nonInteractive = false) {
         for (const name of toInstall) {
           const { dep } = installable.find((r) => r.dep.name === name)!;
 
-          if (dep.name === "Agent Mail") {
-            const goResult = results.find((r) => r.dep.name === "Go");
+          if (dep.name === 'Agent Mail') {
+            const goResult = results.find((r) => r.dep.name === 'Go');
             if (!goResult?.available) {
-              p.log.warn("Agent Mail requires Go. Installing Go first...");
-              const goDep = DEPENDENCIES.find((d) => d.name === "Go")!;
+              p.log.warn('Agent Mail requires Go. Installing Go first...');
+              const goDep = DEPENDENCIES.find((d) => d.name === 'Go')!;
               const goSpinner = p.spinner();
-              goSpinner.start("Installing Go...");
+              goSpinner.start('Installing Go...');
               const goSuccess = await runInstall(goDep.install);
               if (goSuccess) {
-                goSpinner.stop("Go installed");
+                goSpinner.stop('Go installed');
               } else {
-                goSpinner.stop("Failed to install Go");
-                p.log.error("Cannot install Agent Mail without Go");
+                goSpinner.stop('Failed to install Go');
+                p.log.error('Cannot install Agent Mail without Go');
                 continue;
               }
             }
           }
 
           const installSpinner = p.spinner();
-          installSpinner.start("Installing " + dep.name + "...");
+          installSpinner.start('Installing ' + dep.name + '...');
 
           const success = await runInstall(dep.install);
 
           if (success) {
-            installSpinner.stop(dep.name + " installed");
+            installSpinner.stop(dep.name + ' installed');
           } else {
-            installSpinner.stop("Failed to install " + dep.name);
-            p.log.message("  Manual: " + dep.install);
+            installSpinner.stop('Failed to install ' + dep.name);
+            p.log.message('  Manual: ' + dep.install);
           }
         }
       }
     }
 
     const manual = optionalMissing.filter(
-      (r) => r.dep.installType === "manual",
+      (r) => r.dep.installType === 'manual',
     );
     if (manual.length > 0) {
-      p.log.step("Manual installation required:");
+      p.log.step('Manual installation required:');
       for (const { dep } of manual) {
-        p.log.message("  " + dep.name + ": " + dep.install);
+        p.log.message('  ' + dep.name + ': ' + dep.install);
       }
     }
   }
 
   // Check for .beads → .hive migration
-  p.log.step("Checking for legacy .beads directory...");
+  p.log.step('Checking for legacy .beads directory...');
   const migrationCheck = checkBeadsMigrationNeeded(cwd);
   if (migrationCheck.needed) {
-    p.log.warn("Found legacy .beads directory");
-    p.log.message(dim("  Path: " + migrationCheck.beadsPath));
-    p.log.message(dim("  Will rename to .hive/ and merge history"));
-    
+    p.log.warn('Found legacy .beads directory');
+    p.log.message(dim('  Path: ' + migrationCheck.beadsPath));
+    p.log.message(dim('  Will rename to .hive/ and merge history'));
+
     const shouldMigrate = await p.confirm({
-      message: "Migrate .beads to .hive? (recommended)",
+      message: 'Migrate .beads to .hive? (recommended)',
       initialValue: true,
     });
 
     if (p.isCancel(shouldMigrate)) {
-      p.cancel("Setup cancelled");
+      p.cancel('Setup cancelled');
       process.exit(0);
     }
 
     if (shouldMigrate) {
       const migrateSpinner = p.spinner();
-      migrateSpinner.start("Migrating .beads to .hive...");
-      
+      migrateSpinner.start('Migrating .beads to .hive...');
+
       try {
         const result = await migrateBeadsToHive(cwd);
         if (result.migrated) {
-          migrateSpinner.stop("Renamed .beads/ → .hive/");
-          p.log.success("Directory migration complete");
-          
+          migrateSpinner.stop('Renamed .beads/ → .hive/');
+          p.log.success('Directory migration complete');
+
           // Merge historic beads into issues.jsonl
-          migrateSpinner.start("Merging historic cells...");
+          migrateSpinner.start('Merging historic cells...');
           const mergeResult = await mergeHistoricBeads(cwd);
           if (mergeResult.merged > 0) {
-            migrateSpinner.stop("Historic cells merged");
-            p.log.success(`Merged ${mergeResult.merged} cells (${mergeResult.skipped} already present)`);
+            migrateSpinner.stop('Historic cells merged');
+            p.log.success(
+              `Merged ${mergeResult.merged} cells (${mergeResult.skipped} already present)`,
+            );
           } else {
-            migrateSpinner.stop("No historic cells to merge");
+            migrateSpinner.stop('No historic cells to merge');
           }
-          
+
           // Import JSONL into PGLite database
-          migrateSpinner.start("Importing to database...");
+          migrateSpinner.start('Importing to database...');
           const importResult = await importJsonlToPGLite(cwd);
-          migrateSpinner.stop("Database import complete");
+          migrateSpinner.stop('Database import complete');
           if (importResult.imported > 0 || importResult.updated > 0) {
-            p.log.success(`Database: ${importResult.imported} imported, ${importResult.updated} updated`);
+            p.log.success(
+              `Database: ${importResult.imported} imported, ${importResult.updated} updated`,
+            );
           }
         } else {
-          migrateSpinner.stop("Migration skipped");
-          p.log.warn(result.reason || "Unknown reason");
+          migrateSpinner.stop('Migration skipped');
+          p.log.warn(result.reason || 'Unknown reason');
         }
       } catch (error) {
-        migrateSpinner.stop("Migration failed");
+        migrateSpinner.stop('Migration failed');
         p.log.error(error instanceof Error ? error.message : String(error));
       }
     } else {
-      p.log.warn("Skipping migration - .beads will continue to work but is deprecated");
+      p.log.warn(
+        'Skipping migration - .beads will continue to work but is deprecated',
+      );
     }
   } else {
-    p.log.message(dim("  No legacy .beads directory found"));
+    p.log.message(dim('  No legacy .beads directory found'));
   }
 
   // Check for legacy semantic-memory MCP server in OpenCode config
-  p.log.step("Checking for legacy MCP servers...");
+  p.log.step('Checking for legacy MCP servers...');
   const opencodeConfigPath = join(configDir, 'config.json');
   if (existsSync(opencodeConfigPath)) {
     try {
-      const opencodeConfig = JSON.parse(readFileSync(opencodeConfigPath, 'utf-8'));
+      const opencodeConfig = JSON.parse(
+        readFileSync(opencodeConfigPath, 'utf-8'),
+      );
       if (opencodeConfig.mcpServers?.['semantic-memory']) {
         p.log.warn('Found legacy semantic-memory MCP server');
         p.log.message(dim('  Semantic memory is now embedded in the plugin'));
-        
+
         const removeMcp = await p.confirm({
           message: 'Remove from MCP servers config?',
           initialValue: true,
@@ -2507,26 +2546,33 @@ async function setup(forceReinstall = false, nonInteractive = false) {
 
         if (removeMcp) {
           delete opencodeConfig.mcpServers['semantic-memory'];
-          writeFileSync(opencodeConfigPath, JSON.stringify(opencodeConfig, null, 2));
+          writeFileSync(
+            opencodeConfigPath,
+            JSON.stringify(opencodeConfig, null, 2),
+          );
           p.log.success('Removed semantic-memory from MCP servers');
           p.log.message(dim(`  Updated: ${opencodeConfigPath}`));
         } else {
-          p.log.warn('Keeping legacy MCP - you may see duplicate semantic-memory tools');
+          p.log.warn(
+            'Keeping legacy MCP - you may see duplicate semantic-memory tools',
+          );
         }
       } else {
         p.log.message(dim('  No legacy MCP servers found'));
       }
     } catch (error) {
-      p.log.message(dim('  Could not parse OpenCode config (skipping MCP check)'));
+      p.log.message(
+        dim('  Could not parse OpenCode config (skipping MCP check)'),
+      );
     }
   } else {
     p.log.message(dim('  No OpenCode config found (skipping MCP check)'));
   }
 
   // Model defaults: opus for coordinator, sonnet for worker, haiku for lite
-  const DEFAULT_COORDINATOR = "anthropic/claude-opus-4-5";
-  const DEFAULT_WORKER = "anthropic/claude-sonnet-4-5";
-  const DEFAULT_LITE = "anthropic/claude-haiku-4-5";
+  const DEFAULT_COORDINATOR = 'anthropic/claude-opus-4-5';
+  const DEFAULT_WORKER = 'anthropic/claude-sonnet-4-5';
+  const DEFAULT_LITE = 'anthropic/claude-haiku-4-5';
 
   // Model selection (skip if non-interactive)
   let coordinatorModel: string;
@@ -2537,160 +2583,162 @@ async function setup(forceReinstall = false, nonInteractive = false) {
     coordinatorModel = DEFAULT_COORDINATOR;
     workerModel = DEFAULT_WORKER;
     liteModel = DEFAULT_LITE;
-    p.log.step("Using default models:");
+    p.log.step('Using default models:');
     p.log.message(dim(`  Coordinator: ${coordinatorModel}`));
     p.log.message(dim(`  Worker: ${workerModel}`));
     p.log.message(dim(`  Lite: ${liteModel}`));
   } else {
-    p.log.step("Configuring swarm agents...");
-    p.log.message(dim("  Coordinator handles orchestration, worker executes tasks"));
+    p.log.step('Configuring swarm agents...');
+    p.log.message(
+      dim('  Coordinator handles orchestration, worker executes tasks'),
+    );
 
     const selectedCoordinator = await p.select({
-      message: "Select coordinator model (for orchestration/planning):",
+      message: 'Select coordinator model (for orchestration/planning):',
       options: [
         {
-          value: "anthropic/claude-opus-4-5",
-          label: "Claude Opus 4.5",
-          hint: "Most capable, best for complex orchestration (recommended)",
+          value: 'anthropic/claude-opus-4-5',
+          label: 'Claude Opus 4.5',
+          hint: 'Most capable, best for complex orchestration (recommended)',
         },
         {
-          value: "anthropic/claude-sonnet-4-5",
-          label: "Claude Sonnet 4.5",
-          hint: "Good balance of speed and capability",
+          value: 'anthropic/claude-sonnet-4-5',
+          label: 'Claude Sonnet 4.5',
+          hint: 'Good balance of speed and capability',
         },
         {
-          value: "anthropic/claude-haiku-4-5",
-          label: "Claude Haiku 4.5",
-          hint: "Fast and cost-effective",
+          value: 'anthropic/claude-haiku-4-5',
+          label: 'Claude Haiku 4.5',
+          hint: 'Fast and cost-effective',
         },
         {
-          value: "openai/gpt-4o",
-          label: "GPT-4o",
-          hint: "Fast, good for most tasks",
+          value: 'openai/gpt-4o',
+          label: 'GPT-4o',
+          hint: 'Fast, good for most tasks',
         },
         {
-          value: "openai/gpt-4-turbo",
-          label: "GPT-4 Turbo",
-          hint: "Powerful, more expensive",
+          value: 'openai/gpt-4-turbo',
+          label: 'GPT-4 Turbo',
+          hint: 'Powerful, more expensive',
         },
         {
-          value: "google/gemini-2.0-flash",
-          label: "Gemini 2.0 Flash",
-          hint: "Fast and capable",
+          value: 'google/gemini-2.0-flash',
+          label: 'Gemini 2.0 Flash',
+          hint: 'Fast and capable',
         },
         {
-          value: "google/gemini-1.5-pro",
-          label: "Gemini 1.5 Pro",
-          hint: "More capable",
+          value: 'google/gemini-1.5-pro',
+          label: 'Gemini 1.5 Pro',
+          hint: 'More capable',
         },
       ],
       initialValue: DEFAULT_COORDINATOR,
     });
 
     if (p.isCancel(selectedCoordinator)) {
-      p.cancel("Setup cancelled");
+      p.cancel('Setup cancelled');
       process.exit(0);
     }
     coordinatorModel = selectedCoordinator;
 
     const selectedWorker = await p.select({
-      message: "Select worker model (for task execution):",
+      message: 'Select worker model (for task execution):',
       options: [
         {
-          value: "anthropic/claude-sonnet-4-5",
-          label: "Claude Sonnet 4.5",
-          hint: "Best balance of speed and capability (recommended)",
+          value: 'anthropic/claude-sonnet-4-5',
+          label: 'Claude Sonnet 4.5',
+          hint: 'Best balance of speed and capability (recommended)',
         },
         {
-          value: "anthropic/claude-haiku-4-5",
-          label: "Claude Haiku 4.5",
-          hint: "Fast and cost-effective",
+          value: 'anthropic/claude-haiku-4-5',
+          label: 'Claude Haiku 4.5',
+          hint: 'Fast and cost-effective',
         },
         {
-          value: "anthropic/claude-opus-4-5",
-          label: "Claude Opus 4.5",
-          hint: "Most capable, slower",
+          value: 'anthropic/claude-opus-4-5',
+          label: 'Claude Opus 4.5',
+          hint: 'Most capable, slower',
         },
         {
-          value: "openai/gpt-4o",
-          label: "GPT-4o",
-          hint: "Fast, good for most tasks",
+          value: 'openai/gpt-4o',
+          label: 'GPT-4o',
+          hint: 'Fast, good for most tasks',
         },
         {
-          value: "openai/gpt-4-turbo",
-          label: "GPT-4 Turbo",
-          hint: "Powerful, more expensive",
+          value: 'openai/gpt-4-turbo',
+          label: 'GPT-4 Turbo',
+          hint: 'Powerful, more expensive',
         },
         {
-          value: "google/gemini-2.0-flash",
-          label: "Gemini 2.0 Flash",
-          hint: "Fast and capable",
+          value: 'google/gemini-2.0-flash',
+          label: 'Gemini 2.0 Flash',
+          hint: 'Fast and capable',
         },
         {
-          value: "google/gemini-1.5-pro",
-          label: "Gemini 1.5 Pro",
-          hint: "More capable",
+          value: 'google/gemini-1.5-pro',
+          label: 'Gemini 1.5 Pro',
+          hint: 'More capable',
         },
       ],
       initialValue: DEFAULT_WORKER,
     });
 
     if (p.isCancel(selectedWorker)) {
-      p.cancel("Setup cancelled");
+      p.cancel('Setup cancelled');
       process.exit(0);
     }
     workerModel = selectedWorker;
 
     // Lite model selection for simple tasks (docs, tests)
     const selectedLite = await p.select({
-      message: "Select lite model (for docs, tests, simple edits):",
+      message: 'Select lite model (for docs, tests, simple edits):',
       options: [
         {
-          value: "anthropic/claude-haiku-4-5",
-          label: "Claude Haiku 4.5",
-          hint: "Fast and cost-effective (recommended)",
+          value: 'anthropic/claude-haiku-4-5',
+          label: 'Claude Haiku 4.5',
+          hint: 'Fast and cost-effective (recommended)',
         },
         {
-          value: "anthropic/claude-sonnet-4-5",
-          label: "Claude Sonnet 4.5",
-          hint: "More capable, slower",
+          value: 'anthropic/claude-sonnet-4-5',
+          label: 'Claude Sonnet 4.5',
+          hint: 'More capable, slower',
         },
         {
-          value: "openai/gpt-4o-mini",
-          label: "GPT-4o Mini",
-          hint: "Fast and cheap",
+          value: 'openai/gpt-4o-mini',
+          label: 'GPT-4o Mini',
+          hint: 'Fast and cheap',
         },
         {
-          value: "google/gemini-2.0-flash",
-          label: "Gemini 2.0 Flash",
-          hint: "Fast and capable",
+          value: 'google/gemini-2.0-flash',
+          label: 'Gemini 2.0 Flash',
+          hint: 'Fast and capable',
         },
       ],
       initialValue: DEFAULT_LITE,
     });
 
     if (p.isCancel(selectedLite)) {
-      p.cancel("Setup cancelled");
+      p.cancel('Setup cancelled');
       process.exit(0);
     }
     liteModel = selectedLite;
   }
 
-  p.log.success("Selected models:");
+  p.log.success('Selected models:');
   p.log.message(dim(`  Coordinator: ${coordinatorModel}`));
   p.log.message(dim(`  Worker: ${workerModel}`));
   p.log.message(dim(`  Lite: ${liteModel}`));
 
-  p.log.step("Setting up OpenCode integration...");
+  p.log.step('Setting up OpenCode integration...');
 
   // Track file operation statistics
   const stats: FileStats = { created: 0, updated: 0, unchanged: 0 };
 
   // Migrate legacy "skills" → "skill" for OpenCode compatibility
-  const legacySkillsDir = join(configDir, "skills");
-  const skillsDir = join(configDir, "skill");
+  const legacySkillsDir = join(configDir, 'skills');
+  const skillsDir = join(configDir, 'skill');
   if (existsSync(legacySkillsDir) && !existsSync(skillsDir)) {
-    p.log.step("Migrating skills directory...");
+    p.log.step('Migrating skills directory...');
     try {
       renameSync(legacySkillsDir, skillsDir);
       p.log.message(dim(`  Renamed: ${legacySkillsDir} → ${skillsDir}`));
@@ -2700,31 +2748,62 @@ async function setup(forceReinstall = false, nonInteractive = false) {
   }
 
   // Create directories if needed
-  p.log.step("Creating configuration directories...");
-  for (const dir of [pluginDir, commandDir, agentDir, swarmAgentDir, skillsDir]) {
+  p.log.step('Creating configuration directories...');
+  for (const dir of [
+    pluginDir,
+    commandDir,
+    agentDir,
+    swarmAgentDir,
+    skillsDir,
+  ]) {
     mkdirWithStatus(dir);
   }
 
   // Write plugin and command files
-  p.log.step("Writing configuration files...");
-  const pluginContent = getPluginWrapper().replace(/__SWARM_LITE_MODEL__/g, liteModel);
-  stats[writeFileWithStatus(pluginPath, pluginContent, "Plugin")]++;
-  stats[writeFileWithStatus(commandPath, SWARM_COMMAND, "Command")]++;
+  p.log.step('Writing configuration files...');
+  const pluginContent = getPluginWrapper().replace(
+    /__SWARM_LITE_MODEL__/g,
+    liteModel,
+  );
+  stats[writeFileWithStatus(pluginPath, pluginContent, 'Plugin')]++;
+  stats[writeFileWithStatus(commandPath, SWARM_COMMAND, 'Command')]++;
 
   // Write nested agent files (swarm-planner.md, swarm-worker.md, swarm-researcher.md)
   // This is the format used by Task(subagent_type="swarm-worker")
-  p.log.step("Writing agent configuration...");
-  stats[writeFileWithStatus(plannerAgentPath, getPlannerAgent(coordinatorModel as string), "Planner agent")]++;
-  stats[writeFileWithStatus(workerAgentPath, getWorkerAgent(workerModel as string), "Worker agent")]++;
-  stats[writeFileWithStatus(researcherAgentPath, getResearcherAgent(workerModel as string), "Researcher agent")]++;
+  p.log.step('Writing agent configuration...');
+  stats[
+    writeFileWithStatus(
+      plannerAgentPath,
+      getPlannerAgent(coordinatorModel as string),
+      'Planner agent',
+    )
+  ]++;
+  stats[
+    writeFileWithStatus(
+      workerAgentPath,
+      getWorkerAgent(workerModel as string),
+      'Worker agent',
+    )
+  ]++;
+  stats[
+    writeFileWithStatus(
+      researcherAgentPath,
+      getResearcherAgent(workerModel as string),
+      'Researcher agent',
+    )
+  ]++;
 
   // Clean up legacy nested agent files if they exist (swarm/planner.md -> swarm-planner.md)
-  if (existsSync(legacyPlannerPath) || existsSync(legacyWorkerPath) || existsSync(legacyResearcherPath)) {
-    p.log.step("Cleaning up legacy nested agent files...");
+  if (
+    existsSync(legacyPlannerPath) ||
+    existsSync(legacyWorkerPath) ||
+    existsSync(legacyResearcherPath)
+  ) {
+    p.log.step('Cleaning up legacy nested agent files...');
   }
-  rmWithStatus(legacyPlannerPath, "legacy swarm/planner");
-  rmWithStatus(legacyWorkerPath, "legacy swarm/worker");
-  rmWithStatus(legacyResearcherPath, "legacy swarm/researcher");
+  rmWithStatus(legacyPlannerPath, 'legacy swarm/planner');
+  rmWithStatus(legacyWorkerPath, 'legacy swarm/worker');
+  rmWithStatus(legacyResearcherPath, 'legacy swarm/researcher');
   // Clean up empty swarm directory if it exists
   if (existsSync(swarmAgentDir)) {
     try {
@@ -2737,11 +2816,11 @@ async function setup(forceReinstall = false, nonInteractive = false) {
   p.log.message(dim(`  Skills directory: ${skillsDir}`));
 
   // Show bundled skills info (and optionally sync to global skills dir)
-  const bundledSkillsPath = join(__dirname, "..", "global-skills");
+  const bundledSkillsPath = join(__dirname, '..', 'global-skills');
   const bundledSkills = listDirectoryNames(bundledSkillsPath);
   if (existsSync(bundledSkillsPath)) {
     if (bundledSkills.length > 0) {
-      p.log.message(dim("  Bundled skills: " + bundledSkills.join(", ")));
+      p.log.message(dim('  Bundled skills: ' + bundledSkills.join(', ')));
     }
   }
 
@@ -2759,32 +2838,32 @@ async function setup(forceReinstall = false, nonInteractive = false) {
       // Always sync bundled skills - no prompt needed
       {
         const syncSpinner = p.spinner();
-        syncSpinner.start("Syncing bundled skills...");
+        syncSpinner.start('Syncing bundled skills...');
         try {
           const { installed, updated, skipped } = syncBundledSkillsToGlobal({
             bundledSkillsPath,
             globalSkillsPath: skillsDir,
             version: VERSION,
           });
-          syncSpinner.stop("Bundled skills synced");
+          syncSpinner.stop('Bundled skills synced');
 
           if (installed.length > 0) {
-            p.log.success("Installed: " + installed.join(", "));
+            p.log.success('Installed: ' + installed.join(', '));
           }
           if (updated.length > 0) {
-            p.log.success("Updated: " + updated.join(", "));
+            p.log.success('Updated: ' + updated.join(', '));
           }
           if (skipped.length > 0) {
             p.log.message(
               dim(
-                "Skipped (already exists, not managed): " + skipped.join(", "),
+                'Skipped (already exists, not managed): ' + skipped.join(', '),
               ),
             );
           }
         } catch (error) {
-          syncSpinner.stop("Could not sync bundled skills");
+          syncSpinner.stop('Could not sync bundled skills');
           p.log.warn(
-            "Bundled skills are still available from the package via skills_list.",
+            'Bundled skills are still available from the package via skills_list.',
           );
           p.log.message(
             dim(error instanceof Error ? error.message : String(error)),
@@ -2795,33 +2874,35 @@ async function setup(forceReinstall = false, nonInteractive = false) {
   }
 
   // Always update AGENTS.md with skill awareness - no prompt needed
-  const agentsPath = join(configDir, "AGENTS.md");
+  const agentsPath = join(configDir, 'AGENTS.md');
   if (existsSync(agentsPath)) {
     {
       const s = p.spinner();
-      s.start("Updating AGENTS.md...");
+      s.start('Updating AGENTS.md...');
 
       try {
         const bundledSkillsCsv =
           bundledSkills.length > 0
-            ? bundledSkills.join(", ")
-            : "cli-builder, learning-systems, skill-creator, swarm-coordination, system-design, testing-patterns";
+            ? bundledSkills.join(', ')
+            : 'cli-builder, learning-systems, skill-creator, swarm-coordination, system-design, testing-patterns';
 
         const result = updateAgentsMdFile({ agentsPath, bundledSkillsCsv });
 
         if (result.changed) {
-          s.stop("AGENTS.md updated");
-          p.log.success("Updated: " + agentsPath);
+          s.stop('AGENTS.md updated');
+          p.log.success('Updated: ' + agentsPath);
           if (result.backupPath) {
-            p.log.message(dim("  Backup: " + result.backupPath));
+            p.log.message(dim('  Backup: ' + result.backupPath));
           }
         } else {
-          s.stop("AGENTS.md already up to date");
+          s.stop('AGENTS.md already up to date');
         }
       } catch (error) {
-        s.stop("Could not update AGENTS.md");
+        s.stop('Could not update AGENTS.md');
         p.log.error(
-          error instanceof Error ? error.message : "Unknown error updating file",
+          error instanceof Error
+            ? error.message
+            : 'Unknown error updating file',
         );
       }
     }
@@ -2833,126 +2914,128 @@ async function setup(forceReinstall = false, nonInteractive = false) {
   if (stats.created > 0) summaryParts.push(`${stats.created} created`);
   if (stats.updated > 0) summaryParts.push(`${stats.updated} updated`);
   if (stats.unchanged > 0) summaryParts.push(`${stats.unchanged} unchanged`);
-  
-  p.log.message("");
-  p.log.success(`Setup complete: ${totalFiles} files (${summaryParts.join(", ")})`);
+
+  p.log.message('');
+  p.log.success(
+    `Setup complete: ${totalFiles} files (${summaryParts.join(', ')})`,
+  );
 
   p.note(
     'cd your-project\nswarm init\nopencode\n/swarm "your task"\n\nSkills: Use skills_list to see available skills',
-    "Next steps",
+    'Next steps',
   );
 
   p.outro("Run 'swarm doctor' to verify installation.");
 }
 
 async function init() {
-  p.intro("swarm init v" + VERSION);
+  p.intro('swarm init v' + VERSION);
 
   const projectPath = process.cwd();
 
-  const gitDir = existsSync(".git");
+  const gitDir = existsSync('.git');
   if (!gitDir) {
-    p.log.error("Not in a git repository");
+    p.log.error('Not in a git repository');
     p.log.message("Run 'git init' first, or cd to a git repo");
-    p.outro("Aborted");
+    p.outro('Aborted');
     process.exit(1);
   }
 
   // Check for existing .hive or .beads directories
-  const hiveDir = existsSync(".hive");
-  const beadsDir = existsSync(".beads");
-  
+  const hiveDir = existsSync('.hive');
+  const beadsDir = existsSync('.beads');
+
   if (hiveDir) {
-    p.log.warn("Hive already initialized in this project (.hive/ exists)");
+    p.log.warn('Hive already initialized in this project (.hive/ exists)');
 
     const reinit = await p.confirm({
-      message: "Continue anyway?",
+      message: 'Continue anyway?',
       initialValue: false,
     });
 
     if (p.isCancel(reinit) || !reinit) {
-      p.outro("Aborted");
+      p.outro('Aborted');
       process.exit(0);
     }
   } else if (beadsDir) {
     // Offer migration from .beads to .hive
-    p.log.warn("Found legacy .beads/ directory");
-    
+    p.log.warn('Found legacy .beads/ directory');
+
     const migrate = await p.confirm({
-      message: "Migrate .beads/ to .hive/?",
+      message: 'Migrate .beads/ to .hive/?',
       initialValue: true,
     });
 
     if (!p.isCancel(migrate) && migrate) {
       const s = p.spinner();
-      s.start("Migrating .beads/ to .hive/...");
-      
+      s.start('Migrating .beads/ to .hive/...');
+
       const result = await migrateBeadsToHive(projectPath);
-      
+
       if (result.migrated) {
-        s.stop("Migration complete");
-        p.log.success("Renamed .beads/ to .hive/");
-        
+        s.stop('Migration complete');
+        p.log.success('Renamed .beads/ to .hive/');
+
         // Merge historic beads if beads.base.jsonl exists
         const mergeResult = await mergeHistoricBeads(projectPath);
         if (mergeResult.merged > 0) {
           p.log.success(`Merged ${mergeResult.merged} historic cells`);
         }
       } else {
-        s.stop("Migration skipped: " + result.reason);
+        s.stop('Migration skipped: ' + result.reason);
       }
     }
   }
 
   const s = p.spinner();
-  s.start("Initializing hive...");
+  s.start('Initializing hive...');
 
   try {
     // Create .hive directory using our function (no bd CLI needed)
     ensureHiveDirectory(projectPath);
-    
-    s.stop("Hive initialized");
-    p.log.success("Created .hive/ directory");
+
+    s.stop('Hive initialized');
+    p.log.success('Created .hive/ directory');
 
     const createCell = await p.confirm({
-      message: "Create your first cell?",
+      message: 'Create your first cell?',
       initialValue: true,
     });
 
     if (!p.isCancel(createCell) && createCell) {
       const title = await p.text({
-        message: "Cell title:",
-        placeholder: "Implement user authentication",
-        validate: (v) => (v.length === 0 ? "Title required" : undefined),
+        message: 'Cell title:',
+        placeholder: 'Implement user authentication',
+        validate: (v) => (v.length === 0 ? 'Title required' : undefined),
       });
 
       if (!p.isCancel(title)) {
         const typeResult = await p.select({
-          message: "Type:",
+          message: 'Type:',
           options: [
-            { value: "feature", label: "Feature", hint: "New functionality" },
-            { value: "bug", label: "Bug", hint: "Something broken" },
-            { value: "task", label: "Task", hint: "General work item" },
-            { value: "chore", label: "Chore", hint: "Maintenance" },
+            { value: 'feature', label: 'Feature', hint: 'New functionality' },
+            { value: 'bug', label: 'Bug', hint: 'Something broken' },
+            { value: 'task', label: 'Task', hint: 'General work item' },
+            { value: 'chore', label: 'Chore', hint: 'Maintenance' },
           ],
         });
 
         if (!p.isCancel(typeResult)) {
           const cellSpinner = p.spinner();
-          cellSpinner.start("Creating cell...");
+          cellSpinner.start('Creating cell...');
 
           try {
             // Use HiveAdapter to create the cell (no bd CLI needed)
             const adapter = await getHiveAdapter(projectPath);
             const cell = await adapter.createCell(projectPath, {
               title: title as string,
-              type: typeResult as "feature" | "bug" | "task" | "chore",
+              type: typeResult as 'feature' | 'bug' | 'task' | 'chore',
               priority: 2,
             });
-            
-            cellSpinner.stop("Cell created: " + cell.id);
+
+            cellSpinner.stop('Cell created: ' + cell.id);
           } catch (error) {
-            cellSpinner.stop("Failed to create cell");
+            cellSpinner.stop('Failed to create cell');
             p.log.error(error instanceof Error ? error.message : String(error));
           }
         }
@@ -2961,91 +3044,87 @@ async function init() {
 
     // Offer to create project skills directory
     const createSkillsDir = await p.confirm({
-      message: "Create project skills directory (.opencode/skill/)?",
+      message: 'Create project skills directory (.opencode/skill/)?',
       initialValue: false,
     });
 
     if (!p.isCancel(createSkillsDir) && createSkillsDir) {
-      const skillsPath = ".opencode/skill";
+      const skillsPath = '.opencode/skill';
       if (!existsSync(skillsPath)) {
         mkdirSync(skillsPath, { recursive: true });
-        p.log.success("Created " + skillsPath + "/");
+        p.log.success('Created ' + skillsPath + '/');
         p.log.message(
-          dim("  Add SKILL.md files here for project-specific skills"),
+          dim('  Add SKILL.md files here for project-specific skills'),
         );
       } else {
-        p.log.warn(skillsPath + "/ already exists");
+        p.log.warn(skillsPath + '/ already exists');
       }
     }
 
     p.outro("Project initialized! Use '/swarm' in OpenCode to get started.");
   } catch (error) {
-    s.stop("Failed to initialize hive");
+    s.stop('Failed to initialize hive');
     p.log.error(error instanceof Error ? error.message : String(error));
-    p.outro("Aborted");
+    p.outro('Aborted');
     process.exit(1);
   }
 }
 
 async function version() {
   console.log(yellow(BANNER));
-  console.log(dim("  " + TAGLINE));
+  console.log(dim('  ' + TAGLINE));
   console.log();
-  console.log("  Version: " + VERSION);
-  console.log("  Docs:    https://github.com/joelhooks/swarm-tools");
+  console.log('  Version: ' + VERSION);
+  console.log('  Docs:    https://github.com/joelhooks/swarm-tools');
   console.log();
-  console.log(cyan("  Get started:"));
-  console.log("    swarm setup    " + dim("Configure OpenCode integration"));
-  console.log("    swarm doctor   " + dim("Check dependencies"));
+  console.log(cyan('  Get started:'));
+  console.log('    swarm setup    ' + dim('Configure OpenCode integration'));
+  console.log('    swarm doctor   ' + dim('Check dependencies'));
   console.log();
-
-  // Check for updates (non-blocking)
-  const updateInfo = await checkForUpdates();
-  if (updateInfo) showUpdateNotification(updateInfo);
 }
 
 function config() {
-  const configDir = join(homedir(), ".config", "opencode");
-  const pluginPath = join(configDir, "plugin", "swarm.ts");
-  const commandPath = join(configDir, "command", "swarm.md");
-  const agentDir = join(configDir, "agent");
+  const configDir = join(homedir(), '.config', 'opencode');
+  const pluginPath = join(configDir, 'plugin', 'swarm.ts');
+  const commandPath = join(configDir, 'command', 'swarm.md');
+  const agentDir = join(configDir, 'agent');
   // OpenCode expects flat agent paths with hyphens (swarm-worker.md)
-  const plannerAgentPath = join(agentDir, "swarm-planner.md");
-  const workerAgentPath = join(agentDir, "swarm-worker.md");
-  const researcherAgentPath = join(agentDir, "swarm-researcher.md");
-  const globalSkillsPath = join(configDir, "skills");
+  const plannerAgentPath = join(agentDir, 'swarm-planner.md');
+  const workerAgentPath = join(agentDir, 'swarm-worker.md');
+  const researcherAgentPath = join(agentDir, 'swarm-researcher.md');
+  const globalSkillsPath = join(configDir, 'skills');
 
   console.log(yellow(BANNER));
-  console.log(dim("  " + TAGLINE + " v" + VERSION));
+  console.log(dim('  ' + TAGLINE + ' v' + VERSION));
   console.log();
-  console.log(cyan("Config Files:"));
+  console.log(cyan('Config Files:'));
   console.log();
 
   const files = [
-    { path: pluginPath, desc: "Plugin loader", emoji: "🔌" },
-    { path: commandPath, desc: "/swarm command prompt", emoji: "📜" },
-    { path: plannerAgentPath, desc: "@swarm-planner agent", emoji: "🤖" },
-    { path: workerAgentPath, desc: "@swarm-worker agent", emoji: "🐝" },
-    { path: researcherAgentPath, desc: "@swarm-researcher agent", emoji: "🔬" },
+    { path: pluginPath, desc: 'Plugin loader', emoji: '🔌' },
+    { path: commandPath, desc: '/swarm command prompt', emoji: '📜' },
+    { path: plannerAgentPath, desc: '@swarm-planner agent', emoji: '🤖' },
+    { path: workerAgentPath, desc: '@swarm-worker agent', emoji: '🐝' },
+    { path: researcherAgentPath, desc: '@swarm-researcher agent', emoji: '🔬' },
   ];
 
   for (const { path, desc, emoji } of files) {
     const exists = existsSync(path);
-    const status = exists ? "✓" : "✗";
-    const color = exists ? "\x1b[32m" : "\x1b[31m";
+    const status = exists ? '✓' : '✗';
+    const color = exists ? '\x1b[32m' : '\x1b[31m';
     console.log(`  ${emoji} ${desc}`);
     console.log(`     ${color}${status}\x1b[0m ${dim(path)}`);
     console.log();
   }
 
   // Skills section
-  console.log(cyan("Skills:"));
+  console.log(cyan('Skills:'));
   console.log();
 
   // Global skills directory
   const globalSkillsExists = existsSync(globalSkillsPath);
-  const globalStatus = globalSkillsExists ? "✓" : "✗";
-  const globalColor = globalSkillsExists ? "\x1b[32m" : "\x1b[31m";
+  const globalStatus = globalSkillsExists ? '✓' : '✗';
+  const globalColor = globalSkillsExists ? '\x1b[32m' : '\x1b[31m';
   console.log(`  📚 Global skills directory`);
   console.log(
     `     ${globalColor}${globalStatus}\x1b[0m ${dim(globalSkillsPath)}`,
@@ -3054,13 +3133,13 @@ function config() {
   // Count skills if directory exists
   if (globalSkillsExists) {
     try {
-      const { readdirSync } = require("fs");
+      const { readdirSync } = require('fs');
       const skills = readdirSync(globalSkillsPath, { withFileTypes: true })
         .filter((d: { isDirectory: () => boolean }) => d.isDirectory())
         .map((d: { name: string }) => d.name);
       if (skills.length > 0) {
         console.log(
-          `     ${dim(`Found ${skills.length} skill(s): ${skills.join(", ")}`)}`,
+          `     ${dim(`Found ${skills.length} skill(s): ${skills.join(', ')}`)}`,
         );
       }
     } catch {
@@ -3070,86 +3149,51 @@ function config() {
   console.log();
 
   // Project skills locations
-  console.log(`  📁 Project skills locations ${dim("(checked in order)")}`);
-  console.log(`     ${dim(".opencode/skill/")}`);
-  console.log(`     ${dim(".claude/skills/")}`);  // Claude uses plural
-  console.log(`     ${dim("skill/")}`);
+  console.log(`  📁 Project skills locations ${dim('(checked in order)')}`);
+  console.log(`     ${dim('.opencode/skill/')}`);
+  console.log(`     ${dim('.claude/skills/')}`); // Claude uses plural
+  console.log(`     ${dim('skill/')}`);
   console.log();
 
   // Bundled skills info
-  const bundledSkillsPath = join(__dirname, "..", "global-skills");
+  const bundledSkillsPath = join(__dirname, '..', 'global-skills');
   if (existsSync(bundledSkillsPath)) {
     try {
-      const { readdirSync } = require("fs");
+      const { readdirSync } = require('fs');
       const bundled = readdirSync(bundledSkillsPath, { withFileTypes: true })
         .filter((d: { isDirectory: () => boolean }) => d.isDirectory())
         .map((d: { name: string }) => d.name);
-      console.log(`  🎁 Bundled skills ${dim("(always available)")}`);
-      console.log(`     ${dim(bundled.join(", "))}`);
+      console.log(`  🎁 Bundled skills ${dim('(always available)')}`);
+      console.log(`     ${dim(bundled.join(', '))}`);
       console.log();
     } catch {
       // Ignore errors
     }
   }
 
-  console.log(dim("Edit these files to customize swarm behavior."));
+  console.log(dim('Edit these files to customize swarm behavior.'));
   console.log(dim("Run 'swarm setup' to regenerate defaults."));
   console.log();
 }
 
 async function update() {
-  p.intro("swarm update v" + VERSION);
+  p.intro('swarm update v' + VERSION);
 
-  const s = p.spinner();
-  s.start("Checking for updates...");
-
-  const updateInfo = await checkForUpdates();
-
-  if (!updateInfo) {
-    s.stop("Failed to check for updates");
-    p.log.error("Could not reach npm registry");
-    p.outro("Try again later or update manually:");
-    console.log("  " + cyan("npm install -g " + PACKAGE_NAME + "@latest"));
-    process.exit(1);
-  }
-
-  if (!updateInfo.updateAvailable) {
-    s.stop("Already on latest version");
-    p.log.success("You're running " + VERSION);
-    p.outro("No update needed!");
-    return;
-  }
-
-  s.stop("Update available: " + VERSION + " → " + updateInfo.latest);
-
-  const confirmUpdate = await p.confirm({
-    message: "Update to v" + updateInfo.latest + "?",
-    initialValue: true,
-  });
-
-  if (p.isCancel(confirmUpdate) || !confirmUpdate) {
-    p.outro("Update cancelled");
-    return;
-  }
-
-  const updateSpinner = p.spinner();
-  updateSpinner.start("Updating to v" + updateInfo.latest + "...");
-
-  const success = await runInstall(
-    "npm install -g " + PACKAGE_NAME + "@latest",
+  p.log.warn(
+    'Automatic update checks and installs have been removed from this command.',
   );
-
-  if (success) {
-    updateSpinner.stop("Updated to v" + updateInfo.latest);
-    p.outro("Success! Restart your terminal to use the new version.");
-  } else {
-    updateSpinner.stop("Update failed");
-    p.log.error("Failed to update via npm");
-    p.log.message("Try manually:");
-    console.log("  " + cyan("npm install -g " + PACKAGE_NAME + "@latest"));
-    p.outro("Update failed");
-    process.exit(1);
-  }
+  p.log.message(
+    'The unscoped npm package "' +
+      PACKAGE_NAME +
+      '" is not published by us and has shipped broken builds in the past.',
+  );
+  p.log.message('To update, run one of these yourself:');
+  console.log('  ' + cyan(CORRECT_INSTALL_BUN));
+  console.log('  ' + dim('or'));
+  console.log('  ' + cyan(CORRECT_INSTALL_NPM));
+  p.outro(
+    'Never run "npm install -g ' + PACKAGE_NAME + '" without the @npm: alias.',
+  );
 }
 
 // ============================================================================
@@ -3159,19 +3203,23 @@ async function update() {
 /**
  * Parse args for query command
  */
-function parseQueryArgs(args: string[]): { format: string; query?: string; preset?: string } {
-  let format = "table";
+function parseQueryArgs(args: string[]): {
+  format: string;
+  query?: string;
+  preset?: string;
+} {
+  let format = 'table';
   let query: string | undefined;
   let preset: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--format") {
-      format = args[i + 1] || "table";
+    if (args[i] === '--format') {
+      format = args[i + 1] || 'table';
       i++;
-    } else if (args[i] === "--sql") {
+    } else if (args[i] === '--sql') {
       query = args[i + 1];
       i++;
-    } else if (args[i] === "--preset") {
+    } else if (args[i] === '--preset') {
       preset = args[i + 1];
       i++;
     }
@@ -3187,7 +3235,7 @@ async function query() {
   // Import query tools
   // Static import at top of file
 
-  p.intro("swarm query");
+  p.intro('swarm query');
 
   const projectPath = process.cwd();
 
@@ -3200,24 +3248,24 @@ async function query() {
       rows = await executePreset(projectPath, parsed.preset);
     } else if (parsed.query) {
       // Execute custom SQL
-      p.log.step("Executing custom SQL");
+      p.log.step('Executing custom SQL');
       rows = await executeQuery(projectPath, parsed.query);
     } else {
-      p.log.error("No query specified. Use --sql or --preset");
-      p.outro("Aborted");
+      p.log.error('No query specified. Use --sql or --preset');
+      p.outro('Aborted');
       process.exit(1);
     }
 
     // Format output
     let output: string;
     switch (parsed.format) {
-      case "csv":
+      case 'csv':
         output = formatAsCSV(rows);
         break;
-      case "json":
+      case 'json':
         output = formatAsJSON(rows);
         break;
-      case "table":
+      case 'table':
       default:
         output = formatAsTable(rows);
         break;
@@ -3229,9 +3277,9 @@ async function query() {
 
     p.outro(`Found ${rows.length} result(s)`);
   } catch (error) {
-    p.log.error("Query failed");
+    p.log.error('Query failed');
     p.log.message(error instanceof Error ? error.message : String(error));
-    p.outro("Aborted");
+    p.outro('Aborted');
     process.exit(1);
   }
 }
@@ -3239,15 +3287,18 @@ async function query() {
 /**
  * Parse args for dashboard command
  */
-function parseDashboardArgs(args: string[]): { epic?: string; refresh: number } {
+function parseDashboardArgs(args: string[]): {
+  epic?: string;
+  refresh: number;
+} {
   let epic: string | undefined;
   let refresh = 1000;
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--epic") {
+    if (args[i] === '--epic') {
       epic = args[i + 1];
       i++;
-    } else if (args[i] === "--refresh") {
+    } else if (args[i] === '--refresh') {
       const ms = parseInt(args[i + 1], 10);
       if (!isNaN(ms) && ms > 0) {
         refresh = ms;
@@ -3265,14 +3316,14 @@ async function dashboard() {
 
   // Static import at top of file
 
-  p.intro("swarm dashboard");
+  p.intro('swarm dashboard');
 
   const projectPath = process.cwd();
 
   console.clear();
-  console.log(yellow("=".repeat(60)));
-  console.log(yellow("  SWARM DASHBOARD"));
-  console.log(yellow("=".repeat(60)));
+  console.log(yellow('='.repeat(60)));
+  console.log(yellow('  SWARM DASHBOARD'));
+  console.log(yellow('='.repeat(60)));
   console.log();
 
   let iteration = 0;
@@ -3282,7 +3333,7 @@ async function dashboard() {
     try {
       // Move cursor to top
       if (iteration > 0) {
-        process.stdout.write("\x1b[H");
+        process.stdout.write('\x1b[H');
       }
 
       const timestamp = new Date().toLocaleTimeString();
@@ -3290,39 +3341,48 @@ async function dashboard() {
       console.log();
 
       // Worker Status
-      console.log(cyan("Worker Status:"));
-      const workers = await getWorkerStatus(projectPath, parsed.epic ? { project_key: parsed.epic } : undefined);
+      console.log(cyan('Worker Status:'));
+      const workers = await getWorkerStatus(
+        projectPath,
+        parsed.epic ? { project_key: parsed.epic } : undefined,
+      );
       if (workers.length === 0) {
-        console.log(dim("  No active workers"));
+        console.log(dim('  No active workers'));
       } else {
         for (const w of workers) {
-          console.log(`  ${w.agent_name} - ${w.status} - ${w.current_task || "idle"}`);
+          console.log(
+            `  ${w.agent_name} - ${w.status} - ${w.current_task || 'idle'}`,
+          );
         }
       }
       console.log();
 
       // Subtask Progress
-      console.log(cyan("Subtask Progress:"));
+      console.log(cyan('Subtask Progress:'));
       if (parsed.epic) {
         const progress = await getSubtaskProgress(projectPath, parsed.epic);
         if (progress.length === 0) {
-          console.log(dim("  No subtasks"));
+          console.log(dim('  No subtasks'));
         } else {
           for (const p of progress) {
-            const bar = "█".repeat(Math.floor(p.progress_percent / 10)) + "░".repeat(10 - Math.floor(p.progress_percent / 10));
-            console.log(`  ${p.bead_id} [${bar}] ${p.progress_percent}% - ${p.status}`);
+            const bar =
+              '█'.repeat(Math.floor(p.progress_percent / 10)) +
+              '░'.repeat(10 - Math.floor(p.progress_percent / 10));
+            console.log(
+              `  ${p.bead_id} [${bar}] ${p.progress_percent}% - ${p.status}`,
+            );
           }
         }
       } else {
-        console.log(dim("  No epic specified (use --epic <id>)"));
+        console.log(dim('  No epic specified (use --epic <id>)'));
       }
       console.log();
 
       // File Locks
-      console.log(cyan("File Locks:"));
+      console.log(cyan('File Locks:'));
       const locks = await getFileLocks(projectPath);
       if (locks.length === 0) {
-        console.log(dim("  No active locks"));
+        console.log(dim('  No active locks'));
       } else {
         for (const lock of locks) {
           console.log(`  ${lock.path} - ${lock.agent_name}`);
@@ -3331,22 +3391,34 @@ async function dashboard() {
       console.log();
 
       // Recent Messages
-      console.log(cyan("Recent Messages:"));
-      const messages = await getRecentMessages(projectPath, { limit: 5, thread_id: parsed.epic });
+      console.log(cyan('Recent Messages:'));
+      const messages = await getRecentMessages(projectPath, {
+        limit: 5,
+        thread_id: parsed.epic,
+      });
       if (messages.length === 0) {
-        console.log(dim("  No recent messages"));
+        console.log(dim('  No recent messages'));
       } else {
         for (const msg of messages) {
-          const timeAgo = Math.floor((Date.now() - new Date(msg.timestamp).getTime()) / 1000);
-          const toList = Array.isArray(msg.to) ? msg.to.join(", ") : "unknown";
-          console.log(`  ${msg.from || "unknown"} → ${toList}: ${msg.subject} (${timeAgo}s ago)`);
+          const timeAgo = Math.floor(
+            (Date.now() - new Date(msg.timestamp).getTime()) / 1000,
+          );
+          const toList = Array.isArray(msg.to) ? msg.to.join(', ') : 'unknown';
+          console.log(
+            `  ${msg.from || 'unknown'} → ${toList}: ${msg.subject} (${timeAgo}s ago)`,
+          );
         }
       }
       console.log();
 
       iteration++;
     } catch (error) {
-      console.log(red("Dashboard error: " + (error instanceof Error ? error.message : String(error))));
+      console.log(
+        red(
+          'Dashboard error: ' +
+            (error instanceof Error ? error.message : String(error)),
+        ),
+      );
     }
   };
 
@@ -3357,10 +3429,10 @@ async function dashboard() {
   const interval = setInterval(refreshLoop, parsed.refresh);
 
   // Handle Ctrl+C
-  process.on("SIGINT", () => {
+  process.on('SIGINT', () => {
     clearInterval(interval);
     console.log();
-    p.outro("Dashboard closed");
+    p.outro('Dashboard closed');
     process.exit(0);
   });
 
@@ -3387,35 +3459,35 @@ function parseReplayArgs(args: string[]): {
   let until: Date | undefined;
 
   // First positional arg is epic ID
-  if (args.length > 0 && !args[0].startsWith("--")) {
+  if (args.length > 0 && !args[0].startsWith('--')) {
     epicId = args[0];
   }
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--speed") {
+    if (args[i] === '--speed') {
       const val = args[i + 1];
-      if (val === "instant") {
+      if (val === 'instant') {
         speed = Infinity;
       } else {
-        const parsed = parseFloat(val?.replace("x", "") || "1");
+        const parsed = parseFloat(val?.replace('x', '') || '1');
         if (!isNaN(parsed) && parsed > 0) {
           speed = parsed;
         }
       }
       i++;
-    } else if (args[i] === "--type") {
-      types = args[i + 1]?.split(",").map((t) => t.trim()) || [];
+    } else if (args[i] === '--type') {
+      types = args[i + 1]?.split(',').map((t) => t.trim()) || [];
       i++;
-    } else if (args[i] === "--agent") {
+    } else if (args[i] === '--agent') {
       agent = args[i + 1];
       i++;
-    } else if (args[i] === "--since") {
+    } else if (args[i] === '--since') {
       const dateStr = args[i + 1];
       if (dateStr) {
         since = new Date(dateStr);
       }
       i++;
-    } else if (args[i] === "--until") {
+    } else if (args[i] === '--until') {
       const dateStr = args[i + 1];
       if (dateStr) {
         until = new Date(dateStr);
@@ -3432,8 +3504,8 @@ async function replay() {
   const parsed = parseReplayArgs(args);
 
   if (!parsed.epicId) {
-    p.log.error("Epic ID required");
-    p.log.message("Usage: swarm replay <epic-id> [options]");
+    p.log.error('Epic ID required');
+    p.log.message('Usage: swarm replay <epic-id> [options]');
     process.exit(1);
   }
 
@@ -3445,7 +3517,7 @@ async function replay() {
 
   try {
     // Fetch events
-    p.log.step("Fetching events...");
+    p.log.step('Fetching events...');
     let events = await fetchEpicEvents(projectPath, parsed.epicId);
 
     // Apply filters
@@ -3457,13 +3529,17 @@ async function replay() {
     });
 
     if (events.length === 0) {
-      p.log.warn("No events found matching filters");
-      p.outro("Aborted");
+      p.log.warn('No events found matching filters');
+      p.outro('Aborted');
       process.exit(0);
     }
 
     p.log.success(`Found ${events.length} events`);
-    p.log.message(dim(`Speed: ${parsed.speed === Infinity ? "instant" : `${parsed.speed}x`}`));
+    p.log.message(
+      dim(
+        `Speed: ${parsed.speed === Infinity ? 'instant' : `${parsed.speed}x`}`,
+      ),
+    );
     console.log();
 
     // Replay events
@@ -3472,11 +3548,11 @@ async function replay() {
     });
 
     console.log();
-    p.outro("Replay complete");
+    p.outro('Replay complete');
   } catch (error) {
-    p.log.error("Replay failed");
+    p.log.error('Replay failed');
     p.log.message(error instanceof Error ? error.message : String(error));
-    p.outro("Aborted");
+    p.outro('Aborted');
     process.exit(1);
   }
 }
@@ -3489,18 +3565,18 @@ function parseExportArgs(args: string[]): {
   epic?: string;
   output?: string;
 } {
-  let format = "json";
+  let format = 'json';
   let epic: string | undefined;
   let output: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--format") {
-      format = args[i + 1] || "json";
+    if (args[i] === '--format') {
+      format = args[i + 1] || 'json';
       i++;
-    } else if (args[i] === "--epic") {
+    } else if (args[i] === '--epic') {
       epic = args[i + 1];
       i++;
-    } else if (args[i] === "--output") {
+    } else if (args[i] === '--output') {
       output = args[i + 1];
       i++;
     }
@@ -3515,7 +3591,7 @@ async function exportEvents() {
 
   // Static import at top of file
 
-  p.intro("swarm export");
+  p.intro('swarm export');
 
   const projectPath = process.cwd();
 
@@ -3525,13 +3601,13 @@ async function exportEvents() {
     p.log.step(`Exporting as ${parsed.format}...`);
 
     switch (parsed.format) {
-      case "otlp":
+      case 'otlp':
         result = await exportToOTLP(projectPath, parsed.epic);
         break;
-      case "csv":
+      case 'csv':
         result = await exportToCSV(projectPath, parsed.epic);
         break;
-      case "json":
+      case 'json':
       default:
         result = await exportToJSON(projectPath, parsed.epic);
         break;
@@ -3547,22 +3623,22 @@ async function exportEvents() {
       console.log();
     }
 
-    p.outro("Export complete");
+    p.outro('Export complete');
   } catch (error) {
-    p.log.error("Export failed");
+    p.log.error('Export failed');
     p.log.message(error instanceof Error ? error.message : String(error));
-    p.outro("Aborted");
+    p.outro('Aborted');
     process.exit(1);
   }
 }
 
 async function help() {
   console.log(yellow(BANNER));
-  console.log(dim("  " + TAGLINE + " v" + VERSION));
+  console.log(dim('  ' + TAGLINE + ' v' + VERSION));
   console.log(getDecoratedBee());
-  console.log(magenta("  " + getRandomMessage()));
+  console.log(magenta('  ' + getRandomMessage()));
   console.log(`
-${cyan("Commands:")}
+${cyan('Commands:')}
   swarm setup           Interactive installer - checks and installs dependencies
     --reinstall, -r     Skip prompt, go straight to reinstall
     --yes, -y           Non-interactive with defaults (opus/sonnet/haiku)
@@ -3591,12 +3667,12 @@ ${cyan("Commands:")}
   swarm tool      Execute a tool (for plugin wrapper)
   swarm help      Show this help
 
-${cyan("Tool Execution:")}
+${cyan('Tool Execution:')}
   swarm tool --list                    List all available tools
   swarm tool <name>                    Execute tool with no args
   swarm tool <name> --json '<args>'    Execute tool with JSON args
 
-${cyan("Cell Management:")}
+${cyan('Cell Management:')}
   swarm cells                          List cells from database (default: 20 most recent)
   swarm cells <id>                     Get single cell by ID or partial hash
   swarm cells --status <status>        Filter by status (open, in_progress, closed, blocked)
@@ -3604,7 +3680,7 @@ ${cyan("Cell Management:")}
   swarm cells --ready                  Show next ready (unblocked) cell
   swarm cells --json                   Raw JSON output (array, no wrapper)
 
-${cyan("Memory Management (Hivemind):")}
+${cyan('Memory Management (Hivemind):')}
   swarm memory store <info> [--tags <tags>]    Store a learning/memory
   swarm memory find <query> [--limit <n>]      Search all memories (semantic + FTS)
   swarm memory get <id>                        Get specific memory by ID
@@ -3615,7 +3691,7 @@ ${cyan("Memory Management (Hivemind):")}
   swarm memory sync                            Sync to .hive/memories.jsonl (use hivemind_sync tool)
   swarm memory <command> --json                Output JSON for all commands
 
-${cyan("Log Viewing:")}
+${cyan('Log Viewing:')}
   swarm log                            Tail recent logs (last 50 lines)
   swarm log <module>                   Filter by module (e.g., compaction)
   swarm log --level <level>            Filter by level (trace, debug, info, warn, error, fatal)
@@ -3630,7 +3706,7 @@ ${cyan("Log Viewing:")}
   swarm log sessions --type <type>     Filter by event type (DECISION, VIOLATION, OUTCOME, COMPACTION)
   swarm log sessions --json            Raw JSON output for jq
 
-${cyan("Stats & History:")}
+${cyan('Stats & History:')}
   swarm stats                          Show swarm health metrics powered by swarm-insights (last 7 days)
   swarm stats --since 24h              Show stats for custom time period
   swarm stats --regressions            Show eval regressions (>10% score drops)
@@ -3643,12 +3719,12 @@ ${cyan("Stats & History:")}
   swarm history --strategy file-based  Filter by decomposition strategy
   swarm history --verbose              Show detailed subtask information
 
-${cyan("Eval Commands:")}
+${cyan('Eval Commands:')}
   swarm eval status [eval-name]        Show current phase, thresholds, recent scores
   swarm eval history                   Show eval run history with trends
   swarm eval run                       Execute evals and report results (stub)
 
-${cyan("Observability Commands:")}
+${cyan('Observability Commands:')}
   swarm query --sql <query>            Execute custom SQL query
   swarm query --preset <name>          Execute preset query (failed_decompositions, duration_by_strategy, etc)
   swarm query --format <fmt>           Output format: table (default), csv, json
@@ -3667,26 +3743,22 @@ ${cyan("Observability Commands:")}
   swarm export --epic <id>             Export specific epic only
   swarm export --output <file>         Write to file instead of stdout
 
-${cyan("Usage in OpenCode:")}
+${cyan('Usage in OpenCode:')}
   /swarm "Add user authentication with OAuth"
   @swarm-planner "Decompose this into parallel tasks"
   @swarm-worker "Execute this specific subtask"
   @swarm-researcher "Research Next.js caching APIs"
 
-${cyan("Customization:")}
+${cyan('Customization:')}
   Edit the generated files to customize behavior:
-  ${dim("~/.config/opencode/command/swarm.md")}           - /swarm command prompt
-  ${dim("~/.config/opencode/agent/swarm-planner.md")}     - @swarm-planner (coordinator)
-  ${dim("~/.config/opencode/agent/swarm-worker.md")}      - @swarm-worker (task executor)
-  ${dim("~/.config/opencode/agent/swarm-researcher.md")}  - @swarm-researcher (read-only research)
-  ${dim("~/.config/opencode/plugin/swarm.ts")}           - Plugin loader
+  ${dim('~/.config/opencode/command/swarm.md')}           - /swarm command prompt
+  ${dim('~/.config/opencode/agent/swarm-planner.md')}     - @swarm-planner (coordinator)
+  ${dim('~/.config/opencode/agent/swarm-worker.md')}      - @swarm-worker (task executor)
+  ${dim('~/.config/opencode/agent/swarm-researcher.md')}  - @swarm-researcher (read-only research)
+  ${dim('~/.config/opencode/plugin/swarm.ts')}           - Plugin loader
 
-${dim("Docs: https://github.com/joelhooks/opencode-swarm-plugin")}
+${dim('Docs: https://github.com/joelhooks/opencode-swarm-plugin')}
 `);
-
-  // Check for updates (non-blocking)
-  const updateInfo = await checkForUpdates();
-  if (updateInfo) showUpdateNotification(updateInfo);
 }
 
 // ============================================================================
@@ -3717,7 +3789,7 @@ async function executeTool(toolName: string, argsJson?: string) {
       JSON.stringify({
         success: false,
         error: {
-          code: "UNKNOWN_TOOL",
+          code: 'UNKNOWN_TOOL',
           message: `Unknown tool: ${toolName}`,
           available_tools: availableTools,
         },
@@ -3736,7 +3808,7 @@ async function executeTool(toolName: string, argsJson?: string) {
         JSON.stringify({
           success: false,
           error: {
-            code: "INVALID_JSON",
+            code: 'INVALID_JSON',
             message: `Invalid JSON args: ${e instanceof Error ? e.message : String(e)}`,
             raw_input: argsJson.slice(0, 200),
           },
@@ -3751,7 +3823,7 @@ async function executeTool(toolName: string, argsJson?: string) {
   const mockContext = {
     sessionID: process.env.OPENCODE_SESSION_ID || `cli-${Date.now()}`,
     messageID: process.env.OPENCODE_MESSAGE_ID || `msg-${Date.now()}`,
-    agent: process.env.OPENCODE_AGENT || "cli",
+    agent: process.env.OPENCODE_AGENT || 'cli',
     abort: new AbortController().signal,
   };
 
@@ -3769,7 +3841,7 @@ async function executeTool(toolName: string, argsJson?: string) {
     try {
       const parsed = JSON.parse(result);
       // If it's already a success/error response, pass through
-      if (typeof parsed === "object" && "success" in parsed) {
+      if (typeof parsed === 'object' && 'success' in parsed) {
         console.log(JSON.stringify(parsed));
       } else {
         console.log(JSON.stringify({ success: true, data: parsed }));
@@ -3784,10 +3856,10 @@ async function executeTool(toolName: string, argsJson?: string) {
       JSON.stringify({
         success: false,
         error: {
-          code: error instanceof Error ? error.name : "TOOL_ERROR",
+          code: error instanceof Error ? error.name : 'TOOL_ERROR',
           message: error instanceof Error ? error.message : String(error),
           details:
-            error instanceof Error && "zodError" in error
+            error instanceof Error && 'zodError' in error
               ? (error as { zodError?: unknown }).zodError
               : undefined,
         },
@@ -3805,15 +3877,15 @@ async function listTools() {
   const tools = Object.keys(allTools).sort();
 
   console.log(yellow(BANNER));
-  console.log(dim("  " + TAGLINE + " v" + VERSION));
+  console.log(dim('  ' + TAGLINE + ' v' + VERSION));
   console.log();
-  console.log(cyan("Available tools:") + ` (${tools.length} total)`);
+  console.log(cyan('Available tools:') + ` (${tools.length} total)`);
   console.log();
 
   // Group by prefix
   const groups: Record<string, string[]> = {};
   for (const tool of tools) {
-    const prefix = tool.split("_")[0];
+    const prefix = tool.split('_')[0];
     if (!groups[prefix]) groups[prefix] = [];
     groups[prefix].push(tool);
   }
@@ -3827,7 +3899,7 @@ async function listTools() {
   }
 
   console.log(dim("Usage: swarm tool <name> [--json '<args>']"));
-  console.log(dim("Example: swarm tool hive_ready"));
+  console.log(dim('Example: swarm tool hive_ready'));
   console.log(
     dim('Example: swarm tool hive_create --json \'{"title": "Fix bug"}\''),
   );
@@ -3838,35 +3910,35 @@ async function listTools() {
 // ============================================================================
 
 async function agents(nonInteractive = false) {
-  const home = process.env.HOME || process.env.USERPROFILE || "~";
-  const agentsPath = join(home, ".config", "opencode", "AGENTS.md");
+  const home = process.env.HOME || process.env.USERPROFILE || '~';
+  const agentsPath = join(home, '.config', 'opencode', 'AGENTS.md');
 
   p.intro(yellow(BANNER));
 
   // Check if AGENTS.md exists
   if (!existsSync(agentsPath)) {
-    p.log.warn("No AGENTS.md found at " + agentsPath);
+    p.log.warn('No AGENTS.md found at ' + agentsPath);
     p.log.message(
-      dim("Create one first, then run this command to add skill awareness"),
+      dim('Create one first, then run this command to add skill awareness'),
     );
-    p.outro("Aborted");
+    p.outro('Aborted');
     return;
   }
 
   if (!nonInteractive) {
     const result = await p.confirm({
-      message: "Update AGENTS.md with Hivemind unification?",
+      message: 'Update AGENTS.md with Hivemind unification?',
       initialValue: true,
     });
 
     if (p.isCancel(result) || !result) {
-      p.outro("Aborted");
+      p.outro('Aborted');
       return;
     }
   }
 
   const s = p.spinner();
-  s.start("Updating AGENTS.md via LLM...");
+  s.start('Updating AGENTS.md via LLM...');
 
   const prompt = `You are updating ~/.config/opencode/AGENTS.md to unify memory tools under Hivemind (ADR-011).
 
@@ -3900,27 +3972,27 @@ TASK: Update the AGENTS.md file to:
 Read the file, make the updates, and save it. Create a backup first.`;
 
   try {
-    const proc = Bun.spawn(["opencode", "run", prompt], {
-      stdio: ["inherit", "pipe", "pipe"],
+    const proc = Bun.spawn(['opencode', 'run', prompt], {
+      stdio: ['inherit', 'pipe', 'pipe'],
       cwd: home,
     });
 
     const exitCode = await proc.exited;
-    
+
     if (exitCode === 0) {
-      s.stop("AGENTS.md updated via LLM");
-      p.log.success("Hivemind unification complete");
+      s.stop('AGENTS.md updated via LLM');
+      p.log.success('Hivemind unification complete');
     } else {
       const stderr = await new Response(proc.stderr).text();
-      s.stop("LLM update failed");
+      s.stop('LLM update failed');
       p.log.error(stderr || `Exit code: ${exitCode}`);
     }
   } catch (error) {
-    s.stop("Failed to run opencode");
+    s.stop('Failed to run opencode');
     p.log.error(String(error));
   }
 
-  p.outro("Done");
+  p.outro('Done');
 }
 
 // ============================================================================
@@ -3928,26 +4000,26 @@ Read the file, make the updates, and save it. Create a backup first.`;
 // ============================================================================
 
 async function migrate() {
-  p.intro("swarm migrate v" + VERSION);
+  p.intro('swarm migrate v' + VERSION);
 
   const projectPath = process.cwd();
-  
+
   // Calculate the temp directory path (same logic as libsql.convenience.ts)
   const tempDirName = getLibSQLProjectTempDirName(projectPath);
   const tempDir = join(tmpdir(), tempDirName);
-  const pglitePath = join(tempDir, "streams");
-  const libsqlPath = join(tempDir, "streams.db");
+  const pglitePath = join(tempDir, 'streams');
+  const libsqlPath = join(tempDir, 'streams.db');
 
   // Check if PGlite exists
   if (!pgliteExists(pglitePath)) {
-    p.log.success("No PGlite database found - nothing to migrate!");
-    p.outro("Done");
+    p.log.success('No PGlite database found - nothing to migrate!');
+    p.outro('Done');
     return;
   }
 
   // Dry run to show counts
   const s = p.spinner();
-  s.start("Scanning PGlite database...");
+  s.start('Scanning PGlite database...');
 
   try {
     const dryResult = await migratePGliteToLibSQL({
@@ -3957,23 +4029,23 @@ async function migrate() {
       onProgress: () => {}, // silent during dry run
     });
 
-    s.stop("Scan complete");
+    s.stop('Scan complete');
 
     // Show summary
-    const totalItems = 
-      dryResult.memories.migrated + 
-      dryResult.beads.migrated + 
-      dryResult.messages.migrated + 
-      dryResult.agents.migrated + 
+    const totalItems =
+      dryResult.memories.migrated +
+      dryResult.beads.migrated +
+      dryResult.messages.migrated +
+      dryResult.agents.migrated +
       dryResult.events.migrated;
 
     if (totalItems === 0) {
-      p.log.warn("PGlite database exists but contains no data");
-      p.outro("Nothing to migrate");
+      p.log.warn('PGlite database exists but contains no data');
+      p.outro('Nothing to migrate');
       return;
     }
 
-    p.log.step("Found data to migrate:");
+    p.log.step('Found data to migrate:');
     if (dryResult.memories.migrated > 0) {
       p.log.message(`  📝 ${dryResult.memories.migrated} memories`);
     }
@@ -3992,18 +4064,18 @@ async function migrate() {
 
     // Confirm
     const confirm = await p.confirm({
-      message: "Migrate this data to libSQL?",
+      message: 'Migrate this data to libSQL?',
       initialValue: true,
     });
 
     if (p.isCancel(confirm) || !confirm) {
-      p.outro("Migration cancelled");
+      p.outro('Migration cancelled');
       return;
     }
 
     // Run actual migration
     const migrateSpinner = p.spinner();
-    migrateSpinner.start("Migrating data...");
+    migrateSpinner.start('Migrating data...');
 
     const result = await migratePGliteToLibSQL({
       pglitePath,
@@ -4011,41 +4083,43 @@ async function migrate() {
       dryRun: false,
       onProgress: (msg) => {
         // Update spinner for key milestones
-        if (msg.includes("Migrating") || msg.includes("complete")) {
-          migrateSpinner.message(msg.replace("[migrate] ", ""));
+        if (msg.includes('Migrating') || msg.includes('complete')) {
+          migrateSpinner.message(msg.replace('[migrate] ', ''));
         }
       },
     });
 
-    migrateSpinner.stop("Migration complete!");
+    migrateSpinner.stop('Migration complete!');
 
     // Show results
-    const showStat = (label: string, stat: { migrated: number; skipped: number; failed: number }) => {
+    const showStat = (
+      label: string,
+      stat: { migrated: number; skipped: number; failed: number },
+    ) => {
       if (stat.migrated > 0 || stat.skipped > 0 || stat.failed > 0) {
         const parts: string[] = [];
         if (stat.migrated > 0) parts.push(green(`${stat.migrated} migrated`));
         if (stat.skipped > 0) parts.push(dim(`${stat.skipped} skipped`));
         if (stat.failed > 0) parts.push(`\x1b[31m${stat.failed} failed\x1b[0m`);
-        p.log.message(`  ${label}: ${parts.join(", ")}`);
+        p.log.message(`  ${label}: ${parts.join(', ')}`);
       }
     };
 
-    showStat("Memories", result.memories);
-    showStat("Cells", result.beads);
-    showStat("Messages", result.messages);
-    showStat("Agents", result.agents);
-    showStat("Events", result.events);
+    showStat('Memories', result.memories);
+    showStat('Cells', result.beads);
+    showStat('Messages', result.messages);
+    showStat('Agents', result.agents);
+    showStat('Events', result.events);
 
     if (result.errors.length > 0) {
       p.log.warn(`${result.errors.length} errors occurred`);
     }
 
-    p.outro("Migration complete! 🐝");
-
+    p.outro('Migration complete! 🐝');
   } catch (error) {
-    s.stop("Migration failed");
+    s.stop('Migration failed');
     p.log.error(error instanceof Error ? error.message : String(error));
-    p.outro("Migration failed");
+    p.outro('Migration failed');
     process.exit(1);
   }
 }
@@ -4054,7 +4128,7 @@ async function migrate() {
 // Session Log Helpers
 // ============================================================================
 
-import type { CoordinatorEvent } from "../dist/eval-capture.js";
+import type { CoordinatorEvent } from '../dist/eval-capture.js';
 
 /**
  * Parse a session file and return events
@@ -4064,8 +4138,8 @@ function parseSessionFile(filePath: string): CoordinatorEvent[] {
     throw new Error(`Session file not found: ${filePath}`);
   }
 
-  const content = readFileSync(filePath, "utf-8");
-  const lines = content.split("\n").filter((line) => line.trim());
+  const content = readFileSync(filePath, 'utf-8');
+  const lines = content.split('\n').filter((line) => line.trim());
   const events: CoordinatorEvent[] = [];
 
   for (const line of lines) {
@@ -4083,9 +4157,7 @@ function parseSessionFile(filePath: string): CoordinatorEvent[] {
 /**
  * List all session files in a directory
  */
-function listSessionFiles(
-  dir: string,
-): Array<{
+function listSessionFiles(dir: string): Array<{
   session_id: string;
   file_path: string;
   event_count: number;
@@ -4094,7 +4166,7 @@ function listSessionFiles(
 }> {
   if (!existsSync(dir)) return [];
 
-  const files = readdirSync(dir).filter((f: string) => f.endsWith(".jsonl"));
+  const files = readdirSync(dir).filter((f: string) => f.endsWith('.jsonl'));
   const sessions: Array<{
     session_id: string;
     file_path: string;
@@ -4129,17 +4201,16 @@ function listSessionFiles(
   }
 
   // Sort by start time (newest first)
-  return sessions.sort((a, b) =>
-    new Date(b.start_time).getTime() - new Date(a.start_time).getTime()
+  return sessions.sort(
+    (a, b) =>
+      new Date(b.start_time).getTime() - new Date(a.start_time).getTime(),
   );
 }
 
 /**
  * Get the latest session file
  */
-function getLatestSession(
-  dir: string,
-): {
+function getLatestSession(dir: string): {
   session_id: string;
   file_path: string;
   event_count: number;
@@ -4157,7 +4228,7 @@ function filterEventsByType(
   events: CoordinatorEvent[],
   eventType: string,
 ): CoordinatorEvent[] {
-  if (eventType === "all") return events;
+  if (eventType === 'all') return events;
   return events.filter((e) => e.event_type === eventType.toUpperCase());
 }
 
@@ -4169,9 +4240,7 @@ function filterEventsSince(
   sinceMs: number,
 ): CoordinatorEvent[] {
   const cutoffTime = Date.now() - sinceMs;
-  return events.filter((e) =>
-    new Date(e.timestamp).getTime() >= cutoffTime
-  );
+  return events.filter((e) => new Date(e.timestamp).getTime() >= cutoffTime);
 }
 
 /**
@@ -4180,27 +4249,27 @@ function filterEventsSince(
 function formatEvent(event: CoordinatorEvent, useColor = true): string {
   const timestamp = new Date(event.timestamp).toLocaleTimeString();
   const typeColor = useColor
-    ? event.event_type === "VIOLATION"
+    ? event.event_type === 'VIOLATION'
       ? red
-      : event.event_type === "OUTCOME"
-      ? green
-      : cyan
+      : event.event_type === 'OUTCOME'
+        ? green
+        : cyan
     : (s: string) => s;
-  
+
   const type = typeColor(event.event_type.padEnd(12));
-  
+
   // Get specific type
-  let specificType = "";
-  if (event.event_type === "DECISION") {
+  let specificType = '';
+  if (event.event_type === 'DECISION') {
     specificType = event.decision_type;
-  } else if (event.event_type === "VIOLATION") {
+  } else if (event.event_type === 'VIOLATION') {
     specificType = event.violation_type;
-  } else if (event.event_type === "OUTCOME") {
+  } else if (event.event_type === 'OUTCOME') {
     specificType = event.outcome_type;
-  } else if (event.event_type === "COMPACTION") {
+  } else if (event.event_type === 'COMPACTION') {
     specificType = event.compaction_type;
   }
-  
+
   return `${timestamp} ${type} ${specificType}`;
 }
 
@@ -4210,8 +4279,8 @@ function formatEvent(event: CoordinatorEvent, useColor = true): string {
 
 async function logSessions() {
   const args = process.argv.slice(4); // Skip 'log' and 'sessions'
-  const sessionsDir = join(homedir(), ".config", "swarm-tools", "sessions");
-  
+  const sessionsDir = join(homedir(), '.config', 'swarm-tools', 'sessions');
+
   // Parse arguments
   let sessionId: string | null = null;
   let latest = false;
@@ -4219,125 +4288,138 @@ async function logSessions() {
   let eventTypeFilter: string | null = null;
   let sinceMs: number | null = null;
   let limit = 100;
-  
+
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    
-    if (arg === "--latest") {
+
+    if (arg === '--latest') {
       latest = true;
-    } else if (arg === "--json") {
+    } else if (arg === '--json') {
       jsonOutput = true;
-    } else if (arg === "--type" && i + 1 < args.length) {
+    } else if (arg === '--type' && i + 1 < args.length) {
       eventTypeFilter = args[++i];
-    } else if (arg === "--since" && i + 1 < args.length) {
+    } else if (arg === '--since' && i + 1 < args.length) {
       const duration = parseDuration(args[++i]);
       if (duration === null) {
         p.log.error(`Invalid duration format: ${args[i]}`);
-        p.log.message(dim("  Use format: 30s, 5m, 2h, 1d"));
+        p.log.message(dim('  Use format: 30s, 5m, 2h, 1d'));
         process.exit(1);
       }
       sinceMs = duration;
-    } else if (arg === "--limit" && i + 1 < args.length) {
+    } else if (arg === '--limit' && i + 1 < args.length) {
       limit = parseInt(args[++i], 10);
       if (isNaN(limit) || limit <= 0) {
         p.log.error(`Invalid limit: ${args[i]}`);
         process.exit(1);
       }
-    } else if (!arg.startsWith("--") && !arg.startsWith("-")) {
+    } else if (!arg.startsWith('--') && !arg.startsWith('-')) {
       // Positional arg = session ID
       sessionId = arg;
     }
   }
-  
+
   // If no args, list sessions
   if (!sessionId && !latest) {
     const sessions = listSessionFiles(sessionsDir);
-    
+
     if (jsonOutput) {
       console.log(JSON.stringify({ sessions }, null, 2));
       return;
     }
-    
+
     if (sessions.length === 0) {
-      p.log.warn("No session files found");
+      p.log.warn('No session files found');
       p.log.message(dim(`  Expected: ${sessionsDir}/*.jsonl`));
       return;
     }
-    
+
     console.log(yellow(BANNER));
     console.log(dim(`  Coordinator Sessions (${sessions.length} total)\n`));
-    
+
     // Show sessions table
     for (const session of sessions) {
       const startTime = new Date(session.start_time).toLocaleString();
       const duration = session.end_time
-        ? ((new Date(session.end_time).getTime() - new Date(session.start_time).getTime()) / 1000).toFixed(0) + "s"
-        : "ongoing";
-      
+        ? (
+            (new Date(session.end_time).getTime() -
+              new Date(session.start_time).getTime()) /
+            1000
+          ).toFixed(0) + 's'
+        : 'ongoing';
+
       console.log(`  ${cyan(session.session_id)}`);
-      console.log(`    ${dim("Started:")} ${startTime}`);
-      console.log(`    ${dim("Events:")}  ${session.event_count}`);
-      console.log(`    ${dim("Duration:")} ${duration}`);
+      console.log(`    ${dim('Started:')} ${startTime}`);
+      console.log(`    ${dim('Events:')}  ${session.event_count}`);
+      console.log(`    ${dim('Duration:')} ${duration}`);
       console.log();
     }
-    
-    console.log(dim("  Use --latest to view most recent session"));
-    console.log(dim("  Use <session_id> to view specific session"));
+
+    console.log(dim('  Use --latest to view most recent session'));
+    console.log(dim('  Use <session_id> to view specific session'));
     console.log();
     return;
   }
-  
+
   // Get session (either by ID or latest)
-  let session: { session_id: string; file_path: string; event_count: number; start_time: string; end_time?: string; } | null = null;
-  
+  let session: {
+    session_id: string;
+    file_path: string;
+    event_count: number;
+    start_time: string;
+    end_time?: string;
+  } | null = null;
+
   if (latest) {
     session = getLatestSession(sessionsDir);
     if (!session) {
-      p.log.error("No sessions found");
+      p.log.error('No sessions found');
       return;
     }
   } else if (sessionId) {
     // Find session by ID (partial match)
     const sessions = listSessionFiles(sessionsDir);
-    session = sessions.find(s => s.session_id.includes(sessionId!)) || null;
-    
+    session = sessions.find((s) => s.session_id.includes(sessionId!)) || null;
+
     if (!session) {
       p.log.error(`Session not found: ${sessionId}`);
       return;
     }
   }
-  
+
   // Load and filter events
   let events = parseSessionFile(session!.file_path);
-  
+
   if (eventTypeFilter) {
     events = filterEventsByType(events, eventTypeFilter);
   }
-  
+
   if (sinceMs !== null) {
     events = filterEventsSince(events, sinceMs);
   }
-  
+
   // Apply limit
   if (events.length > limit) {
     events = events.slice(-limit);
   }
-  
+
   // Output
   if (jsonOutput) {
-    console.log(JSON.stringify({ session_id: session!.session_id, events }, null, 2));
+    console.log(
+      JSON.stringify({ session_id: session!.session_id, events }, null, 2),
+    );
     return;
   }
-  
+
   console.log(yellow(BANNER));
   console.log(dim(`  Session: ${session!.session_id}\n`));
-  console.log(`  ${dim("Events:")}  ${events.length}/${session!.event_count}`);
-  if (eventTypeFilter) console.log(`  ${dim("Type:")}    ${eventTypeFilter}`);
-  if (sinceMs !== null) console.log(`  ${dim("Since:")}   ${args[args.indexOf("--since") + 1]}`);
+  console.log(`  ${dim('Events:')}  ${events.length}/${session!.event_count}`);
+  if (eventTypeFilter) console.log(`  ${dim('Type:')}    ${eventTypeFilter}`);
+  if (sinceMs !== null)
+    console.log(`  ${dim('Since:')}   ${args[args.indexOf('--since') + 1]}`);
   console.log();
-  
+
   for (const event of events) {
-    console.log("  " + formatEvent(event, true));
+    console.log('  ' + formatEvent(event, true));
   }
   console.log();
 }
@@ -4360,14 +4442,14 @@ function parseLogLine(line: string, sourceFile?: string): LogLine | null {
     if (parsed.time && parsed.msg) {
       // Handle both pino format (level: number) and plugin wrapper format (level: string)
       let level: number;
-      if (typeof parsed.level === "number") {
+      if (typeof parsed.level === 'number') {
         level = parsed.level;
-      } else if (typeof parsed.level === "string") {
+      } else if (typeof parsed.level === 'string') {
         level = levelNameToNumber(parsed.level);
       } else {
         level = 30; // default to info
       }
-      
+
       // Derive module from: explicit field, or source filename (e.g., "compaction.log" -> "compaction")
       let module = parsed.module;
       if (!module && sourceFile) {
@@ -4377,15 +4459,21 @@ function parseLogLine(line: string, sourceFile?: string): LogLine | null {
           module = match[1];
         }
       }
-      
+
       // Extract extra data (everything except core fields)
-      const { level: _l, time: _t, module: _m, msg: _msg, ...extraData } = parsed;
+      const {
+        level: _l,
+        time: _t,
+        module: _m,
+        msg: _msg,
+        ...extraData
+      } = parsed;
       const hasExtraData = Object.keys(extraData).length > 0;
-      
+
       return {
         level,
         time: parsed.time,
-        module: module || "unknown",
+        module: module || 'unknown',
         msg: parsed.msg,
         data: hasExtraData ? extraData : undefined,
       };
@@ -4397,12 +4485,12 @@ function parseLogLine(line: string, sourceFile?: string): LogLine | null {
 }
 
 function levelToName(level: number): string {
-  if (level >= 60) return "FATAL";
-  if (level >= 50) return "ERROR";
-  if (level >= 40) return "WARN ";
-  if (level >= 30) return "INFO ";
-  if (level >= 20) return "DEBUG";
-  return "TRACE";
+  if (level >= 60) return 'FATAL';
+  if (level >= 50) return 'ERROR';
+  if (level >= 40) return 'WARN ';
+  if (level >= 30) return 'INFO ';
+  if (level >= 20) return 'DEBUG';
+  return 'TRACE';
 }
 
 function levelToColor(level: number): (s: string) => string {
@@ -4414,29 +4502,29 @@ function levelToColor(level: number): (s: string) => string {
 
 function levelNameToNumber(name: string): number {
   const lower = name.toLowerCase();
-  if (lower === "fatal") return 60;
-  if (lower === "error") return 50;
-  if (lower === "warn") return 40;
-  if (lower === "info") return 30;
-  if (lower === "debug") return 20;
-  if (lower === "trace") return 10;
+  if (lower === 'fatal') return 60;
+  if (lower === 'error') return 50;
+  if (lower === 'warn') return 40;
+  if (lower === 'info') return 30;
+  if (lower === 'debug') return 20;
+  if (lower === 'trace') return 10;
   return 30; // default to info
 }
 
 function parseDuration(duration: string): number | null {
   const match = duration.match(/^(\d+)([smhd])$/);
   if (!match) return null;
-  
+
   const [, num, unit] = match;
   const value = parseInt(num, 10);
-  
+
   const multipliers: Record<string, number> = {
     s: 1000,
     m: 60 * 1000,
     h: 60 * 60 * 1000,
     d: 24 * 60 * 60 * 1000,
   };
-  
+
   return value * multipliers[unit];
 }
 
@@ -4445,14 +4533,14 @@ function formatLogLine(log: LogLine, useColor = true, verbose = false): string {
   const levelName = levelToName(log.level);
   const module = log.module.padEnd(12);
   const levelStr = useColor ? levelToColor(log.level)(levelName) : levelName;
-  
+
   let output = `${timestamp} ${levelStr} ${module} ${log.msg}`;
-  
+
   // In verbose mode, pretty print the structured data
   if (verbose && log.data) {
     output += `\n${dim(JSON.stringify(log.data, null, 2))}`;
   }
-  
+
   return output;
 }
 
@@ -4463,19 +4551,21 @@ interface LogEntry {
 
 function readLogFiles(dir: string): LogEntry[] {
   if (!existsSync(dir)) return [];
-  
+
   const allFiles = readdirSync(dir);
   // Match both pino-roll format (*.1log, *.2log) AND plain *.log files
   const logFiles = allFiles
     .filter((f: string) => /\.\d+log$/.test(f) || /\.log$/.test(f))
     .sort()
     .map((f: string) => join(dir, f));
-  
+
   const entries: LogEntry[] = [];
   for (const file of logFiles) {
     try {
-      const content = readFileSync(file, "utf-8");
-      const fileLines = content.split("\n").filter((line: string) => line.trim());
+      const content = readFileSync(file, 'utf-8');
+      const fileLines = content
+        .split('\n')
+        .filter((line: string) => line.trim());
       for (const line of fileLines) {
         entries.push({ line, file });
       }
@@ -4483,59 +4573,61 @@ function readLogFiles(dir: string): LogEntry[] {
       // Skip unreadable files
     }
   }
-  
+
   return entries;
 }
 
 /**
  * Format cells as table output
  */
-function formatCellsTable(cells: Array<{
-  id: string;
-  title: string;
-  status: string;
-  priority: number;
-}>): string {
+function formatCellsTable(
+  cells: Array<{
+    id: string;
+    title: string;
+    status: string;
+    priority: number;
+  }>,
+): string {
   if (cells.length === 0) {
-    return "No cells found";
+    return 'No cells found';
   }
 
-  const rows = cells.map(c => ({
+  const rows = cells.map((c) => ({
     id: c.id,
-    title: c.title.length > 50 ? c.title.slice(0, 47) + "..." : c.title,
+    title: c.title.length > 50 ? c.title.slice(0, 47) + '...' : c.title,
     status: c.status,
     priority: String(c.priority),
   }));
 
   // Calculate column widths
   const widths = {
-    id: Math.max(2, ...rows.map(r => r.id.length)),
-    title: Math.max(5, ...rows.map(r => r.title.length)),
-    status: Math.max(6, ...rows.map(r => r.status.length)),
-    priority: Math.max(8, ...rows.map(r => r.priority.length)),
+    id: Math.max(2, ...rows.map((r) => r.id.length)),
+    title: Math.max(5, ...rows.map((r) => r.title.length)),
+    status: Math.max(6, ...rows.map((r) => r.status.length)),
+    priority: Math.max(8, ...rows.map((r) => r.priority.length)),
   };
 
   // Build header
   const header = [
-    "ID".padEnd(widths.id),
-    "TITLE".padEnd(widths.title),
-    "STATUS".padEnd(widths.status),
-    "PRIORITY".padEnd(widths.priority),
-  ].join("  ");
+    'ID'.padEnd(widths.id),
+    'TITLE'.padEnd(widths.title),
+    'STATUS'.padEnd(widths.status),
+    'PRIORITY'.padEnd(widths.priority),
+  ].join('  ');
 
-  const separator = "-".repeat(header.length);
+  const separator = '-'.repeat(header.length);
 
   // Build rows
-  const bodyRows = rows.map(r =>
+  const bodyRows = rows.map((r) =>
     [
       r.id.padEnd(widths.id),
       r.title.padEnd(widths.title),
       r.status.padEnd(widths.status),
       r.priority.padEnd(widths.priority),
-    ].join("  ")
+    ].join('  '),
   );
 
-  return [header, separator, ...bodyRows].join("\n");
+  return [header, separator, ...bodyRows].join('\n');
 }
 
 /**
@@ -4543,104 +4635,120 @@ function formatCellsTable(cells: Array<{
  */
 async function cells() {
   const args = process.argv.slice(3);
-  
+
   // Parse arguments
   let cellId: string | null = null;
   let statusFilter: string | null = null;
   let typeFilter: string | null = null;
   let readyOnly = false;
   let jsonOutput = false;
-  
+
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    
-    if (arg === "--status" && i + 1 < args.length) {
+
+    if (arg === '--status' && i + 1 < args.length) {
       statusFilter = args[++i];
-      if (!["open", "in_progress", "closed", "blocked"].includes(statusFilter)) {
+      if (
+        !['open', 'in_progress', 'closed', 'blocked'].includes(statusFilter)
+      ) {
         p.log.error(`Invalid status: ${statusFilter}`);
-        p.log.message(dim("  Valid statuses: open, in_progress, closed, blocked"));
+        p.log.message(
+          dim('  Valid statuses: open, in_progress, closed, blocked'),
+        );
         process.exit(1);
       }
-    } else if (arg === "--type" && i + 1 < args.length) {
+    } else if (arg === '--type' && i + 1 < args.length) {
       typeFilter = args[++i];
-      if (!["task", "bug", "feature", "epic", "chore"].includes(typeFilter)) {
+      if (!['task', 'bug', 'feature', 'epic', 'chore'].includes(typeFilter)) {
         p.log.error(`Invalid type: ${typeFilter}`);
-        p.log.message(dim("  Valid types: task, bug, feature, epic, chore"));
+        p.log.message(dim('  Valid types: task, bug, feature, epic, chore'));
         process.exit(1);
       }
-    } else if (arg === "--ready") {
+    } else if (arg === '--ready') {
       readyOnly = true;
-    } else if (arg === "--json") {
+    } else if (arg === '--json') {
       jsonOutput = true;
-    } else if (!arg.startsWith("--") && !arg.startsWith("-")) {
+    } else if (!arg.startsWith('--') && !arg.startsWith('-')) {
       // Positional arg = cell ID (full or partial)
       cellId = arg;
     }
   }
-  
+
   // Get adapter using swarm-mail
   const projectPath = process.cwd();
   // Static import at top of file
-  
+
   try {
     const swarmMail = await getSwarmMailLibSQL(projectPath);
     const db = await swarmMail.getDatabase();
     const adapter = createHiveAdapter(db, projectPath);
-    
+
     // Run migrations to ensure schema exists
     await adapter.runMigrations();
-    
+
     // If cell ID provided, get single cell
     if (cellId) {
       // Resolve partial ID to full ID
-      const fullId = await resolvePartialId(adapter, projectPath, cellId) || cellId;
+      const fullId =
+        (await resolvePartialId(adapter, projectPath, cellId)) || cellId;
       const cell = await adapter.getCell(projectPath, fullId);
-      
+
       if (!cell) {
         p.log.error(`Cell not found: ${cellId}`);
         process.exit(1);
       }
-      
+
       if (jsonOutput) {
         console.log(JSON.stringify([cell], null, 2));
       } else {
-        const table = formatCellsTable([{
-          id: cell.id,
-          title: cell.title,
-          status: cell.status,
-          priority: cell.priority,
-        }]);
+        const table = formatCellsTable([
+          {
+            id: cell.id,
+            title: cell.title,
+            status: cell.status,
+            priority: cell.priority,
+          },
+        ]);
         console.log(table);
       }
       return;
     }
-    
+
     // Otherwise query cells
-    let cells: Array<{ id: string; title: string; status: string; priority: number }>;
-    
+    let cells: Array<{
+      id: string;
+      title: string;
+      status: string;
+      priority: number;
+    }>;
+
     if (readyOnly) {
       const readyCell = await adapter.getNextReadyCell(projectPath);
-      cells = readyCell ? [{
-        id: readyCell.id,
-        title: readyCell.title,
-        status: readyCell.status,
-        priority: readyCell.priority,
-      }] : [];
+      cells = readyCell
+        ? [
+            {
+              id: readyCell.id,
+              title: readyCell.title,
+              status: readyCell.status,
+              priority: readyCell.priority,
+            },
+          ]
+        : [];
     } else {
       const queriedCells = await adapter.queryCells(projectPath, {
-        status: statusFilter as any || undefined,
-        type: typeFilter as any || undefined,
+        status: (statusFilter as any) || undefined,
+        type: (typeFilter as any) || undefined,
         limit: 20,
       });
-      
-      cells = queriedCells.map(c => ({
+
+      cells = queriedCells.map((c) => ({
         id: c.id,
         title: c.title,
         status: c.status,
         priority: c.priority,
       }));
     }
-    
+
     if (jsonOutput) {
       console.log(JSON.stringify(cells, null, 2));
     } else {
@@ -4656,13 +4764,13 @@ async function cells() {
 
 async function logs() {
   const args = process.argv.slice(3);
-  
+
   // Check for 'sessions' subcommand
-  if (args[0] === "sessions") {
+  if (args[0] === 'sessions') {
     await logSessions();
     return;
   }
-  
+
   // Parse arguments
   let moduleFilter: string | null = null;
   let levelFilter: number | null = null;
@@ -4672,92 +4780,97 @@ async function logs() {
   let watchMode = false;
   let pollInterval = 1000; // 1 second default
   let verbose = false;
-  
+
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    
-    if (arg === "--level" && i + 1 < args.length) {
+
+    if (arg === '--level' && i + 1 < args.length) {
       levelFilter = levelNameToNumber(args[++i]);
-    } else if (arg === "--since" && i + 1 < args.length) {
+    } else if (arg === '--since' && i + 1 < args.length) {
       const duration = parseDuration(args[++i]);
       if (duration === null) {
         p.log.error(`Invalid duration format: ${args[i]}`);
-        p.log.message(dim("  Use format: 30s, 5m, 2h, 1d"));
+        p.log.message(dim('  Use format: 30s, 5m, 2h, 1d'));
         process.exit(1);
       }
       sinceMs = duration;
-    } else if (arg === "--json") {
+    } else if (arg === '--json') {
       jsonOutput = true;
-    } else if (arg === "--limit" && i + 1 < args.length) {
+    } else if (arg === '--limit' && i + 1 < args.length) {
       limit = parseInt(args[++i], 10);
       if (isNaN(limit) || limit <= 0) {
         p.log.error(`Invalid limit: ${args[i]}`);
         process.exit(1);
       }
-    } else if (arg === "--watch" || arg === "-w") {
+    } else if (arg === '--watch' || arg === '-w') {
       watchMode = true;
-    } else if (arg === "--verbose" || arg === "-v") {
+    } else if (arg === '--verbose' || arg === '-v') {
       verbose = true;
-    } else if (arg === "--interval" && i + 1 < args.length) {
+    } else if (arg === '--interval' && i + 1 < args.length) {
       pollInterval = parseInt(args[++i], 10);
       if (isNaN(pollInterval) || pollInterval < 100) {
         p.log.error(`Invalid interval: ${args[i]} (minimum 100ms)`);
         process.exit(1);
       }
-    } else if (!arg.startsWith("--") && !arg.startsWith("-")) {
+    } else if (!arg.startsWith('--') && !arg.startsWith('-')) {
       // Positional arg = module filter
       moduleFilter = arg;
     }
   }
-  
+
   // Read logs from ~/.config/swarm-tools/logs/
-  const logsDir = join(homedir(), ".config", "swarm-tools", "logs");
-  
+  const logsDir = join(homedir(), '.config', 'swarm-tools', 'logs');
+
   if (!existsSync(logsDir)) {
     if (!jsonOutput) {
-      p.log.warn("No logs directory found");
+      p.log.warn('No logs directory found');
       p.log.message(dim(`  Expected: ${logsDir}`));
     } else {
       console.log(JSON.stringify({ logs: [] }));
     }
     return;
   }
-  
+
   // Helper to filter logs
   const filterLogs = (rawLogs: LogLine[]): LogLine[] => {
     let filtered = rawLogs;
-    
+
     if (moduleFilter) {
       filtered = filtered.filter((log) => log.module === moduleFilter);
     }
-    
+
     if (levelFilter !== null) {
       filtered = filtered.filter((log) => log.level >= levelFilter);
     }
-    
+
     if (sinceMs !== null) {
       const cutoffTime = Date.now() - sinceMs;
-      filtered = filtered.filter((log) => new Date(log.time).getTime() >= cutoffTime);
+      filtered = filtered.filter(
+        (log) => new Date(log.time).getTime() >= cutoffTime,
+      );
     }
-    
+
     return filtered;
   };
-  
+
   // Watch mode - continuous monitoring
   if (watchMode) {
     console.log(yellow(BANNER));
     console.log(dim(`  Watching logs... (Ctrl+C to stop)`));
     if (moduleFilter) console.log(dim(`  Module: ${moduleFilter}`));
-    if (levelFilter !== null) console.log(dim(`  Level: >=${levelToName(levelFilter)}`));
+    if (levelFilter !== null)
+      console.log(dim(`  Level: >=${levelToName(levelFilter)}`));
     console.log();
-    
+
     // Track file positions for incremental reads
     const filePositions: Map<string, number> = new Map();
-    
+
     // Initialize positions from current file sizes
     const initializePositions = () => {
       if (!existsSync(logsDir)) return;
-      const files = readdirSync(logsDir).filter((f: string) => /\.\d+log$/.test(f) || /\.log$/.test(f));
+      const files = readdirSync(logsDir).filter(
+        (f: string) => /\.\d+log$/.test(f) || /\.log$/.test(f),
+      );
       for (const file of files) {
         const filePath = join(logsDir, file);
         try {
@@ -4768,13 +4881,13 @@ async function logs() {
         }
       }
     };
-    
+
     // Read new lines from a file since last position
     const readNewLines = (filePath: string): string[] => {
       try {
         const stats = statSync(filePath);
         const lastPos = filePositions.get(filePath) || 0;
-        
+
         if (stats.size <= lastPos) {
           // File was truncated or no new content
           if (stats.size < lastPos) {
@@ -4782,41 +4895,43 @@ async function logs() {
           }
           return [];
         }
-        
-        const content = readFileSync(filePath, "utf-8");
+
+        const content = readFileSync(filePath, 'utf-8');
         const newContent = content.slice(lastPos);
         filePositions.set(filePath, stats.size);
-        
-        return newContent.split("\n").filter((line: string) => line.trim());
+
+        return newContent.split('\n').filter((line: string) => line.trim());
       } catch {
         return [];
       }
     };
-    
+
     // Print initial logs (last N lines)
     const rawEntries = readLogFiles(logsDir);
     let logs: LogLine[] = rawEntries
-      .map(entry => parseLogLine(entry.line, entry.file))
+      .map((entry) => parseLogLine(entry.line, entry.file))
       .filter((log): log is LogLine => log !== null);
     logs = filterLogs(logs).slice(-limit);
-    
+
     for (const log of logs) {
       console.log(formatLogLine(log, true, verbose));
     }
-    
+
     // Initialize positions after printing initial logs
     initializePositions();
-    
+
     // Poll for new logs
     const pollForNewLogs = () => {
       if (!existsSync(logsDir)) return;
-      
-      const files = readdirSync(logsDir).filter((f: string) => /\.\d+log$/.test(f) || /\.log$/.test(f));
-      
+
+      const files = readdirSync(logsDir).filter(
+        (f: string) => /\.\d+log$/.test(f) || /\.log$/.test(f),
+      );
+
       for (const file of files) {
         const filePath = join(logsDir, file);
         const newLines = readNewLines(filePath);
-        
+
         for (const line of newLines) {
           const parsed = parseLogLine(line, filePath);
           if (parsed) {
@@ -4828,54 +4943,56 @@ async function logs() {
         }
       }
     };
-    
+
     // Set up polling interval
     const intervalId = setInterval(pollForNewLogs, pollInterval);
-    
+
     // Handle graceful shutdown
     const cleanup = () => {
       clearInterval(intervalId);
-      console.log(dim("\n  Stopped watching."));
+      console.log(dim('\n  Stopped watching.'));
       process.exit(0);
     };
-    
-    process.on("SIGINT", cleanup);
-    process.on("SIGTERM", cleanup);
-    
+
+    process.on('SIGINT', cleanup);
+    process.on('SIGTERM', cleanup);
+
     // Keep process alive
     await new Promise(() => {});
     return;
   }
-  
+
   // Non-watch mode - one-shot output
   const rawEntries = readLogFiles(logsDir);
-  
+
   // Parse and filter
   let logs: LogLine[] = rawEntries
-    .map(entry => parseLogLine(entry.line, entry.file))
+    .map((entry) => parseLogLine(entry.line, entry.file))
     .filter((log): log is LogLine => log !== null);
-  
+
   logs = filterLogs(logs);
-  
+
   // Apply limit (keep most recent)
   logs = logs.slice(-limit);
-  
+
   // Output
   if (jsonOutput) {
     console.log(JSON.stringify({ logs }, null, 2));
   } else {
     if (logs.length === 0) {
-      p.log.warn("No logs found matching filters");
+      p.log.warn('No logs found matching filters');
       return;
     }
-    
+
     console.log(yellow(BANNER));
     console.log(dim(`  Logs (${logs.length} entries)`));
     if (moduleFilter) console.log(dim(`  Module: ${moduleFilter}`));
-    if (levelFilter !== null) console.log(dim(`  Level: >=${levelToName(levelFilter)}`));
-    if (sinceMs !== null) console.log(dim(`  Since: last ${args[args.indexOf("--since") + 1]}`));
+    if (levelFilter !== null)
+      console.log(dim(`  Level: >=${levelToName(levelFilter)}`));
+    if (sinceMs !== null)
+      console.log(dim(`  Since: last ${args[args.indexOf('--since') + 1]}`));
     console.log();
-    
+
     for (const log of logs) {
       console.log(formatLogLine(log, true, verbose));
     }
@@ -4889,7 +5006,7 @@ async function logs() {
 
 /**
  * Show database location and status
- * 
+ *
  * Helps debug which database is being used and its schema state.
  */
 async function db() {
@@ -4897,89 +5014,106 @@ async function db() {
   const projectName = basename(projectPath);
   const hash = hashLibSQLProjectPath(projectPath);
   const dbPath = getLibSQLDatabasePath(projectPath);
-  const dbDir = dirname(dbPath.replace("file:", ""));
-  const dbFile = dbPath.replace("file:", "");
-  
+  const dbDir = dirname(dbPath.replace('file:', ''));
+  const dbFile = dbPath.replace('file:', '');
+
   console.log(yellow(BANNER));
   console.log(dim(`  ${TAGLINE}\n`));
-  
-  console.log(cyan("  Database Info\n"));
-  
-  console.log(`  ${dim("Project:")}     ${projectPath}`);
-  console.log(`  ${dim("Project Name:")} ${projectName}`);
-  console.log(`  ${dim("Hash:")}         ${hash}`);
-  console.log(`  ${dim("DB Directory:")} ${dbDir}`);
-  console.log(`  ${dim("DB File:")}      ${dbFile}`);
+
+  console.log(cyan('  Database Info\n'));
+
+  console.log(`  ${dim('Project:')}     ${projectPath}`);
+  console.log(`  ${dim('Project Name:')} ${projectName}`);
+  console.log(`  ${dim('Hash:')}         ${hash}`);
+  console.log(`  ${dim('DB Directory:')} ${dbDir}`);
+  console.log(`  ${dim('DB File:')}      ${dbFile}`);
   console.log();
-  
+
   // Check if database exists
   if (existsSync(dbFile)) {
     const stats = statSync(dbFile);
     const sizeKB = Math.round(stats.size / 1024);
-    console.log(`  ${green("✓")} Database exists (${sizeKB} KB)`);
-    
+    console.log(`  ${green('✓')} Database exists (${sizeKB} KB)`);
+
     // Check schema
     try {
       // Static import at top of file
-      const schema = execSync(`sqlite3 "${dbFile}" "SELECT sql FROM sqlite_master WHERE type='table' AND name='beads'"`, { encoding: "utf-8" }).trim();
-      
+      const schema = execSync(
+        `sqlite3 "${dbFile}" "SELECT sql FROM sqlite_master WHERE type='table' AND name='beads'"`,
+        { encoding: 'utf-8' },
+      ).trim();
+
       if (schema) {
-        const hasProjectKey = schema.includes("project_key");
+        const hasProjectKey = schema.includes('project_key');
         if (hasProjectKey) {
-          console.log(`  ${green("✓")} Schema is correct (has project_key)`);
+          console.log(`  ${green('✓')} Schema is correct (has project_key)`);
         } else {
           console.log(`  \x1b[31m✗\x1b[0m Schema is OLD (missing project_key)`);
           console.log();
-          console.log(dim("    To fix: delete the database and restart OpenCode"));
+          console.log(
+            dim('    To fix: delete the database and restart OpenCode'),
+          );
           console.log(dim(`    rm -r "${dbDir}"`));
         }
       } else {
-        console.log(`  ${dim("○")} No beads table yet (will be created on first use)`);
+        console.log(
+          `  ${dim('○')} No beads table yet (will be created on first use)`,
+        );
       }
-      
+
       // Check schema_version
       try {
-        const version = execSync(`sqlite3 "${dbFile}" "SELECT MAX(version) FROM schema_version"`, { encoding: "utf-8" }).trim();
-        if (version && version !== "") {
-          console.log(`  ${dim("○")} Schema version: ${version}`);
+        const version = execSync(
+          `sqlite3 "${dbFile}" "SELECT MAX(version) FROM schema_version"`,
+          { encoding: 'utf-8' },
+        ).trim();
+        if (version && version !== '') {
+          console.log(`  ${dim('○')} Schema version: ${version}`);
         }
       } catch {
-        console.log(`  ${dim("○")} No schema_version table`);
+        console.log(`  ${dim('○')} No schema_version table`);
       }
-      
+
       // Count records
       try {
-        const beadCount = execSync(`sqlite3 "${dbFile}" "SELECT COUNT(*) FROM beads"`, { encoding: "utf-8" }).trim();
-        console.log(`  ${dim("○")} Cells: ${beadCount}`);
+        const beadCount = execSync(
+          `sqlite3 "${dbFile}" "SELECT COUNT(*) FROM beads"`,
+          { encoding: 'utf-8' },
+        ).trim();
+        console.log(`  ${dim('○')} Cells: ${beadCount}`);
       } catch {
         // Table doesn't exist yet
       }
-      
+
       try {
         // libSQL bug: COUNT(*) returns 0 on tables with F32_BLOB vector columns
-        const memoryCount = execSync(`sqlite3 "${dbFile}" "SELECT COUNT(id) FROM memories"`, { encoding: "utf-8" }).trim();
-        console.log(`  ${dim("○")} Memories: ${memoryCount}`);
+        const memoryCount = execSync(
+          `sqlite3 "${dbFile}" "SELECT COUNT(id) FROM memories"`,
+          { encoding: 'utf-8' },
+        ).trim();
+        console.log(`  ${dim('○')} Memories: ${memoryCount}`);
       } catch {
         // Table doesn't exist yet
       }
-      
     } catch (error) {
-      console.log(`  ${dim("○")} Could not inspect schema (sqlite3 not available)`);
+      console.log(
+        `  ${dim('○')} Could not inspect schema (sqlite3 not available)`,
+      );
     }
   } else {
-    console.log(`  ${dim("○")} Database does not exist yet`);
-    console.log(dim("    Will be created on first use"));
+    console.log(`  ${dim('○')} Database does not exist yet`);
+    console.log(dim('    Will be created on first use'));
   }
-  
+
   // Check for legacy PGLite
   console.log();
-  const pglitePath = join(dbDir, "streams");
+  const pglitePath = join(dbDir, 'streams');
   if (existsSync(pglitePath)) {
     console.log(`  \x1b[33m!\x1b[0m Legacy PGLite directory exists`);
     console.log(dim(`    ${pglitePath}`));
     console.log(dim("    Run 'swarm migrate' to migrate data"));
   }
-  
+
   console.log();
 }
 
@@ -4991,9 +5125,9 @@ async function db() {
  * Generate sparkline from array of scores (0-1 range)
  */
 function generateSparkline(scores: number[]): string {
-  if (scores.length === 0) return "";
+  if (scores.length === 0) return '';
 
-  const chars = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+  const chars = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
   const min = Math.min(...scores);
   const max = Math.max(...scores);
   const range = max - min;
@@ -5006,40 +5140,59 @@ function generateSparkline(scores: number[]): string {
   return scores
     .map((score) => {
       const normalized = (score - min) / range;
-      const index = Math.min(Math.floor(normalized * chars.length), chars.length - 1);
+      const index = Math.min(
+        Math.floor(normalized * chars.length),
+        chars.length - 1,
+      );
       return chars[index];
     })
-    .join("");
+    .join('');
 }
 
 /**
  * Format eval status for display
  */
 function formatEvalStatusOutput(status: {
-  phase: "bootstrap" | "stabilization" | "production";
+  phase: 'bootstrap' | 'stabilization' | 'production';
   runCount: number;
   thresholds: { stabilization: number; production: number };
   recentScores: Array<{ timestamp: string; score: number }>;
 }): void {
   // Phase banner with color
-  const phaseEmoji = status.phase === "bootstrap" ? "🌱" : status.phase === "stabilization" ? "⚙️" : "🚀";
-  const phaseColor = status.phase === "bootstrap" ? yellow : status.phase === "stabilization" ? cyan : green;
+  const phaseEmoji =
+    status.phase === 'bootstrap'
+      ? '🌱'
+      : status.phase === 'stabilization'
+        ? '⚙️'
+        : '🚀';
+  const phaseColor =
+    status.phase === 'bootstrap'
+      ? yellow
+      : status.phase === 'stabilization'
+        ? cyan
+        : green;
   p.log.step(`${phaseEmoji} Phase: ${phaseColor(bold(status.phase))}`);
-  p.log.message(`${dim("Runs:")} ${status.runCount}`);
+  p.log.message(`${dim('Runs:')} ${status.runCount}`);
   console.log();
 
   // Thresholds box
-  p.log.message(bold("Gate Thresholds"));
+  p.log.message(bold('Gate Thresholds'));
   const stabilizationPct = (status.thresholds.stabilization * 100).toFixed(0);
   const productionPct = (status.thresholds.production * 100).toFixed(0);
-  p.log.message(`  ${yellow("⚠")}  Stabilization: ${stabilizationPct}% regression ${dim("(warn)")}`);
-  p.log.message(`  ${red("✗")}  Production:    ${productionPct}% regression ${dim("(fail)")}`);
+  p.log.message(
+    `  ${yellow('⚠')}  Stabilization: ${stabilizationPct}% regression ${dim('(warn)')}`,
+  );
+  p.log.message(
+    `  ${red('✗')}  Production:    ${productionPct}% regression ${dim('(fail)')}`,
+  );
   console.log();
 
   // Recent scores with sparkline
   if (status.recentScores.length > 0) {
-    p.log.message(bold("Recent Scores"));
-    const sparkline = generateSparkline(status.recentScores.map((s) => s.score));
+    p.log.message(bold('Recent Scores'));
+    const sparkline = generateSparkline(
+      status.recentScores.map((s) => s.score),
+    );
     p.log.message(cyan(`  ${sparkline}`));
     for (const { timestamp, score } of status.recentScores) {
       const time = new Date(timestamp).toLocaleString();
@@ -5047,25 +5200,27 @@ function formatEvalStatusOutput(status: {
       p.log.message(`  ${dim(time)}: ${scoreColor(score.toFixed(2))}`);
     }
   } else {
-    p.log.message(dim("No scores yet - collecting data"));
+    p.log.message(dim('No scores yet - collecting data'));
   }
 }
 
 /**
  * Format eval history for display
  */
-function formatEvalHistoryOutput(history: Array<{
-  timestamp: string;
-  eval_name: string;
-  score: number;
-  run_count: number;
-}>): void {
+function formatEvalHistoryOutput(
+  history: Array<{
+    timestamp: string;
+    eval_name: string;
+    score: number;
+    run_count: number;
+  }>,
+): void {
   if (history.length === 0) {
-    p.log.message("No eval history found");
+    p.log.message('No eval history found');
     return;
   }
 
-  p.log.step("Eval History");
+  p.log.step('Eval History');
   console.log();
 
   // Group by eval name
@@ -5080,28 +5235,33 @@ function formatEvalHistoryOutput(history: Array<{
   // Display each eval group
   for (const [evalName, entries] of grouped) {
     p.log.message(bold(cyan(evalName)));
-    
+
     // Calculate stats
     const scores = entries.map((e) => e.score);
     const avgScore = scores.reduce((sum, s) => sum + s, 0) / scores.length;
     const sparkline = generateSparkline(scores);
-    
+
     // Trend line with stats
     const avgColor = avgScore >= 0.8 ? green : avgScore >= 0.6 ? yellow : red;
-    p.log.message(`  ${cyan(sparkline)} ${dim("avg:")} ${avgColor(avgScore.toFixed(2))} ${dim(`(${entries.length} runs)`)}`);
-    
+    p.log.message(
+      `  ${cyan(sparkline)} ${dim('avg:')} ${avgColor(avgScore.toFixed(2))} ${dim(`(${entries.length} runs)`)}`,
+    );
+
     // Show latest 5 entries
     const latest = entries.slice(-5);
     for (const entry of latest) {
       const time = new Date(entry.timestamp).toLocaleTimeString();
-      const scoreColor = entry.score >= 0.8 ? green : entry.score >= 0.6 ? yellow : red;
-      p.log.message(`  ${dim(time)} ${dim(`#${entry.run_count}`)} ${scoreColor(entry.score.toFixed(2))}`);
+      const scoreColor =
+        entry.score >= 0.8 ? green : entry.score >= 0.6 ? yellow : red;
+      p.log.message(
+        `  ${dim(time)} ${dim(`#${entry.run_count}`)} ${scoreColor(entry.score.toFixed(2))}`,
+      );
     }
-    
+
     if (entries.length > 5) {
       p.log.message(dim(`  ... and ${entries.length - 5} more`));
     }
-    
+
     console.log();
   }
 }
@@ -5111,7 +5271,7 @@ function formatEvalHistoryOutput(history: Array<{
  */
 function formatEvalRunResultOutput(result: {
   passed: boolean;
-  phase: "bootstrap" | "stabilization" | "production";
+  phase: 'bootstrap' | 'stabilization' | 'production';
   message: string;
   baseline?: number;
   currentScore: number;
@@ -5119,29 +5279,44 @@ function formatEvalRunResultOutput(result: {
 }): void {
   // Pass/fail banner with color
   if (result.passed) {
-    p.log.success(bold(green("✓ PASS")));
+    p.log.success(bold(green('✓ PASS')));
   } else {
-    p.log.error(bold(red("✗ FAIL")));
+    p.log.error(bold(red('✗ FAIL')));
   }
   console.log();
 
   // Phase
-  const phaseColor = result.phase === "bootstrap" ? yellow : result.phase === "stabilization" ? cyan : green;
-  p.log.message(`${dim("Phase:")} ${phaseColor(result.phase)}`);
-  
+  const phaseColor =
+    result.phase === 'bootstrap'
+      ? yellow
+      : result.phase === 'stabilization'
+        ? cyan
+        : green;
+  p.log.message(`${dim('Phase:')} ${phaseColor(result.phase)}`);
+
   // Score with color coding
-  const scoreColor = result.currentScore >= 0.8 ? green : result.currentScore >= 0.6 ? yellow : red;
-  p.log.message(`${dim("Score:")} ${bold(scoreColor(result.currentScore.toFixed(2)))}`);
+  const scoreColor =
+    result.currentScore >= 0.8
+      ? green
+      : result.currentScore >= 0.6
+        ? yellow
+        : red;
+  p.log.message(
+    `${dim('Score:')} ${bold(scoreColor(result.currentScore.toFixed(2)))}`,
+  );
 
   if (result.baseline !== undefined) {
-    p.log.message(`${dim("Baseline:")} ${result.baseline.toFixed(2)}`);
+    p.log.message(`${dim('Baseline:')} ${result.baseline.toFixed(2)}`);
   }
 
   if (result.regressionPercent !== undefined) {
     const regressionPct = result.regressionPercent * 100;
-    const sign = regressionPct > 0 ? "+" : "";
-    const regressionColor = regressionPct > 5 ? red : regressionPct > 0 ? yellow : green;
-    p.log.message(`${dim("Regression:")} ${regressionColor(`${sign}${regressionPct.toFixed(1)}%`)}`);
+    const sign = regressionPct > 0 ? '+' : '';
+    const regressionColor =
+      regressionPct > 5 ? red : regressionPct > 0 ? yellow : green;
+    p.log.message(
+      `${dim('Regression:')} ${regressionColor(`${sign}${regressionPct.toFixed(1)}%`)}`,
+    );
   }
 
   console.log();
@@ -5153,43 +5328,46 @@ function formatEvalRunResultOutput(result: {
 // ============================================================================
 
 async function stats() {
-	// Static import at top of file
+  // Static import at top of file
 
-	p.intro("swarm stats");
+  p.intro('swarm stats');
 
-	// Parse args
-	const args = process.argv.slice(3);
-	let period = "7d"; // default to 7 days
-	let format: "text" | "json" = "text";
-	let showRegressions = false;
+  // Parse args
+  const args = process.argv.slice(3);
+  let period = '7d'; // default to 7 days
+  let format: 'text' | 'json' = 'text';
+  let showRegressions = false;
 
-	for (let i = 0; i < args.length; i++) {
-		if (args[i] === "--since" || args[i] === "-s") {
-			period = args[i + 1] || "7d";
-			i++;
-		} else if (args[i] === "--json") {
-			format = "json";
-		} else if (args[i] === "--regressions") {
-			showRegressions = true;
-		}
-	}
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--since' || args[i] === '-s') {
+      period = args[i + 1] || '7d';
+      i++;
+    } else if (args[i] === '--json') {
+      format = 'json';
+    } else if (args[i] === '--regressions') {
+      showRegressions = true;
+    }
+  }
 
-	try {
-		const projectPath = process.cwd();
-		const swarmMail = await getSwarmMailLibSQL(projectPath);
-		const db = await swarmMail.getDatabase();
-		
-		// Calculate since timestamp
-		const since = parseTimePeriod(period);
-		const periodMatch = period.match(/^(\d+)([dhm])$/);
-		const periodDays = periodMatch ? 
-			(periodMatch[2] === "d" ? Number.parseInt(periodMatch[1]) :
-			 periodMatch[2] === "h" ? Number.parseInt(periodMatch[1]) / 24 :
-			 Number.parseInt(periodMatch[1]) / (24 * 60)) : 7;
+  try {
+    const projectPath = process.cwd();
+    const swarmMail = await getSwarmMailLibSQL(projectPath);
+    const db = await swarmMail.getDatabase();
 
-		// Query overall stats
-		const overallResult = await db.query(
-			`SELECT 
+    // Calculate since timestamp
+    const since = parseTimePeriod(period);
+    const periodMatch = period.match(/^(\d+)([dhm])$/);
+    const periodDays = periodMatch
+      ? periodMatch[2] === 'd'
+        ? Number.parseInt(periodMatch[1])
+        : periodMatch[2] === 'h'
+          ? Number.parseInt(periodMatch[1]) / 24
+          : Number.parseInt(periodMatch[1]) / (24 * 60)
+      : 7;
+
+    // Query overall stats
+    const overallResult = await db.query(
+      `SELECT 
 				COUNT(DISTINCT json_extract(data, '$.epic_id')) as total_swarms,
 				SUM(CASE WHEN json_extract(data, '$.success') = 'true' THEN 1 ELSE 0 END) as successes,
 				COUNT(*) as total_outcomes,
@@ -5197,153 +5375,165 @@ async function stats() {
 			FROM events
 			WHERE type = 'subtask_outcome'
 				AND timestamp >= ?`,
-			[since],
-		);
+      [since],
+    );
 
-		const overall = overallResult.rows[0] as {
-			total_swarms: number;
-			successes: number;
-			total_outcomes: number;
-			avg_duration_min: number;
-		} || { total_swarms: 0, successes: 0, total_outcomes: 0, avg_duration_min: 0 };
+    const overall = (overallResult.rows[0] as {
+      total_swarms: number;
+      successes: number;
+      total_outcomes: number;
+      avg_duration_min: number;
+    }) || {
+      total_swarms: 0,
+      successes: 0,
+      total_outcomes: 0,
+      avg_duration_min: 0,
+    };
 
-		// Query strategy breakdown
-		const strategyResult = await db.query(
-			`SELECT 
+    // Query strategy breakdown
+    const strategyResult = await db.query(
+      `SELECT 
 				json_extract(data, '$.strategy') as strategy,
 				json_extract(data, '$.success') as success
 			FROM events
 			WHERE type = 'subtask_outcome'
 				AND timestamp >= ?`,
-			[since],
-		);
+      [since],
+    );
 
-		const strategies = aggregateByStrategy(
-			(strategyResult.rows as Array<{ strategy: string | null; success: string }>).map(
-				(row) => ({
-					strategy: row.strategy,
-					success: row.success === "true",
-				}),
-			),
-		);
+    const strategies = aggregateByStrategy(
+      (
+        strategyResult.rows as Array<{
+          strategy: string | null;
+          success: string;
+        }>
+      ).map((row) => ({
+        strategy: row.strategy,
+        success: row.success === 'true',
+      })),
+    );
 
-		// Query coordinator stats from sessions
-		const sessionsPath = join(
-			homedir(),
-			".config",
-			"swarm-tools",
-			"sessions",
-		);
-		let coordinatorStats = {
-			violationRate: 0,
-			spawnEfficiency: 0,
-			reviewThoroughness: 0,
-		};
+    // Query coordinator stats from sessions
+    const sessionsPath = join(homedir(), '.config', 'swarm-tools', 'sessions');
+    let coordinatorStats = {
+      violationRate: 0,
+      spawnEfficiency: 0,
+      reviewThoroughness: 0,
+    };
 
-		if (existsSync(sessionsPath)) {
-			const sessionFiles = readdirSync(sessionsPath).filter(
-				(f) => f.endsWith(".jsonl") && statSync(join(sessionsPath, f)).mtimeMs >= since,
-			);
+    if (existsSync(sessionsPath)) {
+      const sessionFiles = readdirSync(sessionsPath).filter(
+        (f) =>
+          f.endsWith('.jsonl') &&
+          statSync(join(sessionsPath, f)).mtimeMs >= since,
+      );
 
-			let totalViolations = 0;
-			let totalSpawns = 0;
-			let totalReviews = 0;
-			let totalSwarms = 0;
+      let totalViolations = 0;
+      let totalSpawns = 0;
+      let totalReviews = 0;
+      let totalSwarms = 0;
 
-			for (const file of sessionFiles) {
-				try {
-					const content = readFileSync(join(sessionsPath, file), "utf-8");
-					const lines = content.trim().split("\n");
+      for (const file of sessionFiles) {
+        try {
+          const content = readFileSync(join(sessionsPath, file), 'utf-8');
+          const lines = content.trim().split('\n');
 
-					let violations = 0;
-					let spawns = 0;
-					let reviews = 0;
+          let violations = 0;
+          let spawns = 0;
+          let reviews = 0;
 
-					for (const line of lines) {
-						try {
-							const event = JSON.parse(line);
-							if (event.type === "VIOLATION") violations++;
-							if (event.type === "DECISION" && event.action === "spawn") spawns++;
-							if (event.type === "DECISION" && event.action === "review") reviews++;
-						} catch {
-							// Skip invalid lines
-						}
-					}
+          for (const line of lines) {
+            try {
+              const event = JSON.parse(line);
+              if (event.type === 'VIOLATION') violations++;
+              if (event.type === 'DECISION' && event.action === 'spawn')
+                spawns++;
+              if (event.type === 'DECISION' && event.action === 'review')
+                reviews++;
+            } catch {
+              // Skip invalid lines
+            }
+          }
 
-					if (spawns > 0 || violations > 0) {
-						totalViolations += violations;
-						totalSpawns += spawns;
-						totalReviews += reviews;
-						totalSwarms++;
-					}
-				} catch {
-					// Skip unreadable files
-				}
-			}
+          if (spawns > 0 || violations > 0) {
+            totalViolations += violations;
+            totalSpawns += spawns;
+            totalReviews += reviews;
+            totalSwarms++;
+          }
+        } catch {
+          // Skip unreadable files
+        }
+      }
 
-			coordinatorStats = {
-				violationRate: totalSwarms > 0 ? (totalViolations / totalSwarms) * 100 : 0,
-				spawnEfficiency: totalSwarms > 0 ? (totalSpawns / totalSwarms) * 100 : 0,
-				reviewThoroughness: totalSpawns > 0 ? (totalReviews / totalSpawns) * 100 : 0,
-			};
-		}
+      coordinatorStats = {
+        violationRate:
+          totalSwarms > 0 ? (totalViolations / totalSwarms) * 100 : 0,
+        spawnEfficiency:
+          totalSwarms > 0 ? (totalSpawns / totalSwarms) * 100 : 0,
+        reviewThoroughness:
+          totalSpawns > 0 ? (totalReviews / totalSpawns) * 100 : 0,
+      };
+    }
 
-		// Build stats data
-		const stats = {
-			overall: {
-				totalSwarms: overall.total_swarms,
-				successRate:
-					overall.total_outcomes > 0
-						? (overall.successes / overall.total_outcomes) * 100
-						: 0,
-				avgDurationMin: overall.avg_duration_min || 0,
-			},
-			byStrategy: strategies,
-			coordinator: coordinatorStats,
-			recentDays: Math.round(periodDays * 10) / 10,
-		};
+    // Build stats data
+    const stats = {
+      overall: {
+        totalSwarms: overall.total_swarms,
+        successRate:
+          overall.total_outcomes > 0
+            ? (overall.successes / overall.total_outcomes) * 100
+            : 0,
+        avgDurationMin: overall.avg_duration_min || 0,
+      },
+      byStrategy: strategies,
+      coordinator: coordinatorStats,
+      recentDays: Math.round(periodDays * 10) / 10,
+    };
 
-		// If --regressions flag, show regression detection results
-		if (showRegressions) {
-			const regressions = detectRegressions(projectPath, 0.10);
-			
-			if (format === "json") {
-				console.log(JSON.stringify({ stats, regressions }, null, 2));
-			} else {
-				console.log();
-				console.log(formatSwarmStats(stats));
-				console.log();
-				
-				if (regressions.length > 0) {
-					console.log("\n⚠️  EVAL REGRESSIONS DETECTED");
-					for (const reg of regressions) {
-						const oldPercent = (reg.oldScore * 100).toFixed(1);
-						const newPercent = (reg.newScore * 100).toFixed(1);
-						const deltaPercent = reg.deltaPercent.toFixed(1);
-						console.log(`├── ${reg.evalName}: ${oldPercent}% → ${newPercent}% (${deltaPercent}%)`);
-					}
-					console.log(`└── Threshold: 10%\n`);
-				} else {
-					console.log("✅ No eval regressions detected (>10% threshold)\n");
-				}
-			}
-		} else {
-			// Normal stats output
-			if (format === "json") {
-				console.log(JSON.stringify(stats, null, 2));
-			} else {
-				console.log();
-				console.log(formatSwarmStats(stats));
-				console.log();
-			}
-		}
+    // If --regressions flag, show regression detection results
+    if (showRegressions) {
+      const regressions = detectRegressions(projectPath, 0.1);
 
-		p.outro("Stats ready!");
-	} catch (error) {
-		p.log.error(error instanceof Error ? error.message : String(error));
-		p.outro("Failed to load stats");
-		process.exit(1);
-	}
+      if (format === 'json') {
+        console.log(JSON.stringify({ stats, regressions }, null, 2));
+      } else {
+        console.log();
+        console.log(formatSwarmStats(stats));
+        console.log();
+
+        if (regressions.length > 0) {
+          console.log('\n⚠️  EVAL REGRESSIONS DETECTED');
+          for (const reg of regressions) {
+            const oldPercent = (reg.oldScore * 100).toFixed(1);
+            const newPercent = (reg.newScore * 100).toFixed(1);
+            const deltaPercent = reg.deltaPercent.toFixed(1);
+            console.log(
+              `├── ${reg.evalName}: ${oldPercent}% → ${newPercent}% (${deltaPercent}%)`,
+            );
+          }
+          console.log(`└── Threshold: 10%\n`);
+        } else {
+          console.log('✅ No eval regressions detected (>10% threshold)\n');
+        }
+      }
+    } else {
+      // Normal stats output
+      if (format === 'json') {
+        console.log(JSON.stringify(stats, null, 2));
+      } else {
+        console.log();
+        console.log(formatSwarmStats(stats));
+        console.log();
+      }
+    }
+
+    p.outro('Stats ready!');
+  } catch (error) {
+    p.log.error(error instanceof Error ? error.message : String(error));
+    p.outro('Failed to load stats');
+    process.exit(1);
+  }
 }
 
 // ============================================================================
@@ -5351,35 +5541,35 @@ async function stats() {
 // ============================================================================
 
 async function o11y() {
-	p.intro("swarm o11y");
+  p.intro('swarm o11y');
 
-	// Parse args
-	const args = process.argv.slice(3);
-	let period = 7; // default to 7 days
+  // Parse args
+  const args = process.argv.slice(3);
+  let period = 7; // default to 7 days
 
-	for (let i = 0; i < args.length; i++) {
-		if (args[i] === "--since" || args[i] === "-s") {
-			const periodStr = args[i + 1] || "7d";
-			const match = periodStr.match(/^(\d+)d$/);
-			period = match ? Number.parseInt(match[1], 10) : 7;
-			i++;
-		}
-	}
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--since' || args[i] === '-s') {
+      const periodStr = args[i + 1] || '7d';
+      const match = periodStr.match(/^(\d+)d$/);
+      period = match ? Number.parseInt(match[1], 10) : 7;
+      i++;
+    }
+  }
 
-	try {
-		const projectPath = process.cwd();
-		const health = await getObservabilityHealth(projectPath, { days: period });
+  try {
+    const projectPath = process.cwd();
+    const health = await getObservabilityHealth(projectPath, { days: period });
 
-		console.log();
-		console.log(formatHealthDashboard(health));
-		console.log();
+    console.log();
+    console.log(formatHealthDashboard(health));
+    console.log();
 
-		p.outro("Health check complete!");
-	} catch (error) {
-		p.log.error(error instanceof Error ? error.message : String(error));
-		p.outro("Failed to load health metrics");
-		process.exit(1);
-	}
+    p.outro('Health check complete!');
+  } catch (error) {
+    p.log.error(error instanceof Error ? error.message : String(error));
+    p.outro('Failed to load health metrics');
+    process.exit(1);
+  }
 }
 
 // ============================================================================
@@ -5387,80 +5577,80 @@ async function o11y() {
 // ============================================================================
 
 async function swarmHistory() {
-	// Static import at top of file
+  // Static import at top of file
 
-	p.intro("swarm history");
+  p.intro('swarm history');
 
-	// Parse args
-	const args = process.argv.slice(3);
-	let limit = 10;
-	let status: "success" | "failed" | "in_progress" | undefined;
-	let strategy: "file-based" | "feature-based" | "risk-based" | undefined;
-	let verbose = false;
+  // Parse args
+  const args = process.argv.slice(3);
+  let limit = 10;
+  let status: 'success' | 'failed' | 'in_progress' | undefined;
+  let strategy: 'file-based' | 'feature-based' | 'risk-based' | undefined;
+  let verbose = false;
 
-	for (let i = 0; i < args.length; i++) {
-		const arg = args[i];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
 
-		if (arg === "--limit" || arg === "-n") {
-			const limitStr = args[i + 1];
-			if (limitStr && !Number.isNaN(Number(limitStr))) {
-				limit = Number(limitStr);
-				i++;
-			}
-		} else if (arg === "--status") {
-			const statusStr = args[i + 1];
-			if (
-				statusStr &&
-				["success", "failed", "in_progress"].includes(statusStr)
-			) {
-				status = statusStr as "success" | "failed" | "in_progress";
-				i++;
-			}
-		} else if (arg === "--strategy") {
-			const strategyStr = args[i + 1];
-			if (
-				strategyStr &&
-				["file-based", "feature-based", "risk-based"].includes(strategyStr)
-			) {
-				strategy = strategyStr as "file-based" | "feature-based" | "risk-based";
-				i++;
-			}
-		} else if (arg === "--verbose" || arg === "-v") {
-			verbose = true;
-		}
-	}
+    if (arg === '--limit' || arg === '-n') {
+      const limitStr = args[i + 1];
+      if (limitStr && !Number.isNaN(Number(limitStr))) {
+        limit = Number(limitStr);
+        i++;
+      }
+    } else if (arg === '--status') {
+      const statusStr = args[i + 1];
+      if (
+        statusStr &&
+        ['success', 'failed', 'in_progress'].includes(statusStr)
+      ) {
+        status = statusStr as 'success' | 'failed' | 'in_progress';
+        i++;
+      }
+    } else if (arg === '--strategy') {
+      const strategyStr = args[i + 1];
+      if (
+        strategyStr &&
+        ['file-based', 'feature-based', 'risk-based'].includes(strategyStr)
+      ) {
+        strategy = strategyStr as 'file-based' | 'feature-based' | 'risk-based';
+        i++;
+      }
+    } else if (arg === '--verbose' || arg === '-v') {
+      verbose = true;
+    }
+  }
 
-	try {
-		const projectPath = process.cwd();
-		const records = await querySwarmHistory(projectPath, {
-			limit,
-			status,
-			strategy,
-		});
+  try {
+    const projectPath = process.cwd();
+    const records = await querySwarmHistory(projectPath, {
+      limit,
+      status,
+      strategy,
+    });
 
-		console.log();
-		console.log(formatSwarmHistory(records));
-		console.log();
+    console.log();
+    console.log(formatSwarmHistory(records));
+    console.log();
 
-		if (verbose && records.length > 0) {
-			console.log("Details:");
-			for (const record of records) {
-				console.log(
-					`  ${record.epic_id}: ${record.epic_title} (${record.strategy})`,
-				);
-				console.log(
-					`    Tasks: ${record.completed_count}/${record.task_count}, Success: ${record.overall_success ? "✅" : "❌"}`,
-				);
-			}
-			console.log();
-		}
+    if (verbose && records.length > 0) {
+      console.log('Details:');
+      for (const record of records) {
+        console.log(
+          `  ${record.epic_id}: ${record.epic_title} (${record.strategy})`,
+        );
+        console.log(
+          `    Tasks: ${record.completed_count}/${record.task_count}, Success: ${record.overall_success ? '✅' : '❌'}`,
+        );
+      }
+      console.log();
+    }
 
-		p.outro("History ready!");
-	} catch (error) {
-		p.log.error(error instanceof Error ? error.message : String(error));
-		p.outro("Failed to load history");
-		process.exit(1);
-	}
+    p.outro('History ready!');
+  } catch (error) {
+    p.log.error(error instanceof Error ? error.message : String(error));
+    p.outro('Failed to load history');
+    process.exit(1);
+  }
 }
 
 // ============================================================================
@@ -5471,21 +5661,21 @@ async function evalCommand() {
   const subcommand = process.argv[3];
 
   switch (subcommand) {
-    case "status": {
+    case 'status': {
       await evalStatus();
       break;
     }
-    case "history": {
+    case 'history': {
       await evalHistory();
       break;
     }
-    case "run": {
+    case 'run': {
       await evalRun();
       break;
     }
     case undefined:
-    case "--help":
-    case "-h": {
+    case '--help':
+    case '-h': {
       await evalHelp();
       break;
     }
@@ -5498,116 +5688,120 @@ async function evalCommand() {
 }
 
 async function evalHelp() {
-  p.intro("swarm eval");
-  
+  p.intro('swarm eval');
+
   console.log();
-  console.log("Eval-Driven Development with Progressive Gates");
+  console.log('Eval-Driven Development with Progressive Gates');
   console.log();
-  console.log("Usage:");
-  console.log("  swarm eval status   - Show current phase, thresholds, recent scores");
-  console.log("  swarm eval history  - Show eval run history with trends");
-  console.log("  swarm eval run      - Execute evals and report results (stub)");
+  console.log('Usage:');
+  console.log(
+    '  swarm eval status   - Show current phase, thresholds, recent scores',
+  );
+  console.log('  swarm eval history  - Show eval run history with trends');
+  console.log(
+    '  swarm eval run      - Execute evals and report results (stub)',
+  );
   console.log();
-  
+
   p.outro("Run 'swarm eval <command>' for details");
 }
 
 async function evalStatus() {
   // Static imports at top of file
-  
-  p.intro("swarm eval status");
-  
+
+  p.intro('swarm eval status');
+
   const projectPath = process.cwd();
-  const evalName = process.argv[4] || "swarm-decomposition"; // Default eval
-  
+  const evalName = process.argv[4] || 'swarm-decomposition'; // Default eval
+
   const phase = getPhase(projectPath, evalName);
   const history = getScoreHistory(projectPath, evalName);
   const recentScores = history.slice(-5).map((run) => ({
     timestamp: run.timestamp,
     score: run.score,
   }));
-  
+
   formatEvalStatusOutput({
     phase,
     runCount: history.length,
     thresholds: DEFAULT_THRESHOLDS,
     recentScores,
   });
-  
+
   console.log();
   p.outro(`Eval: ${evalName}`);
 }
 
 async function evalHistory() {
   // Static import at top of file
-  
-  p.intro("swarm eval history");
-  
+
+  p.intro('swarm eval history');
+
   const projectPath = process.cwd();
   const historyPath = getEvalHistoryPath(projectPath);
-  
+
   if (!existsSync(historyPath)) {
-    p.log.warn("No eval history found");
+    p.log.warn('No eval history found');
     p.log.message(dim(`Expected: ${historyPath}`));
-    p.outro("Run evals to generate history");
+    p.outro('Run evals to generate history');
     return;
   }
-  
+
   // Read all history
-  const content = readFileSync(historyPath, "utf-8");
-  const lines = content.trim().split("\n").filter(Boolean);
+  const content = readFileSync(historyPath, 'utf-8');
+  const lines = content.trim().split('\n').filter(Boolean);
   const history = lines.map((line) => JSON.parse(line));
-  
+
   formatEvalHistoryOutput(history);
-  
+
   p.outro(`History file: ${historyPath}`);
 }
 
 async function evalRun() {
-  const ciMode = process.argv.includes("--ci");
+  const ciMode = process.argv.includes('--ci');
   const projectPath = process.cwd();
-  
+
   if (!ciMode) {
-    p.intro("swarm eval run");
+    p.intro('swarm eval run');
   }
-  
+
   // Import gate checking
   // Static imports at top of file
-  
+
   // Run evalite for each eval
   const evalFiles = [
-    "compaction-prompt",
-    "coordinator-behavior", 
-    "coordinator-session",
-    "swarm-decomposition",
+    'compaction-prompt',
+    'coordinator-behavior',
+    'coordinator-session',
+    'swarm-decomposition',
   ];
-  
+
   const results: Record<string, any> = {};
   let anyFailure = false;
-  
+
   for (const evalName of evalFiles) {
     if (!ciMode) {
       p.log.step(`Running ${evalName}...`);
     } else {
       console.log(`Running ${evalName}...`);
     }
-    
+
     try {
       // Run evalite (simplified - in real implementation would parse actual results)
       // For now, use a placeholder score - the real implementation would integrate with evalite
       const evalPath = `evals/${evalName}.eval.ts`;
-      
+
       // This is a stub - real implementation would:
       // 1. Run evalite and capture results
       // 2. Parse the score from evalite output
       // 3. Use that score for gate checking
-      
+
       // For CI mode, we'll assume passing scores for now
       const mockScore = 0.85; // Placeholder
-      
+
       // Check gate
       const gateResult = checkGate(projectPath, evalName, mockScore);
-      
+
       // Record to history
       const history = getScoreHistory(projectPath, evalName);
       recordEvalRun(projectPath, {
@@ -5616,20 +5810,22 @@ async function evalRun() {
         score: mockScore,
         run_count: history.length + 1,
       });
-      
+
       // Store result
       results[evalName] = gateResult;
-      
+
       if (!gateResult.passed) {
         anyFailure = true;
       }
-      
+
       // Format output
       if (!ciMode) {
         formatEvalRunResultOutput(gateResult);
       } else {
-        const status = gateResult.passed ? "✅ PASS" : "❌ FAIL";
-        console.log(`${evalName}: ${status} (${gateResult.phase}, score: ${gateResult.currentScore.toFixed(2)})`);
+        const status = gateResult.passed ? '✅ PASS' : '❌ FAIL';
+        console.log(
+          `${evalName}: ${status} (${gateResult.phase}, score: ${gateResult.currentScore.toFixed(2)})`,
+        );
         console.log(`  ${gateResult.message}`);
       }
     } catch (error) {
@@ -5641,30 +5837,32 @@ async function evalRun() {
       anyFailure = true;
     }
   }
-  
+
   // In CI mode, write results to file for PR comment
   if (ciMode) {
-    const resultsPath = join(projectPath, ".hive", "eval-results.json");
+    const resultsPath = join(projectPath, '.hive', 'eval-results.json');
     ensureHiveDirectory(projectPath);
     writeFileSync(resultsPath, JSON.stringify(results, null, 2));
     console.log(`\nResults written to ${resultsPath}`);
-    
+
     // Exit with error code if any production-phase eval failed
     if (anyFailure) {
       const productionFailures = Object.entries(results).filter(
-        ([_, result]) => !result.passed && result.phase === "production"
+        ([_, result]) => !result.passed && result.phase === 'production',
       );
-      
+
       if (productionFailures.length > 0) {
-        console.error(`\n❌ ${productionFailures.length} production-phase eval(s) failed`);
+        console.error(
+          `\n❌ ${productionFailures.length} production-phase eval(s) failed`,
+        );
         process.exit(1);
       }
     }
-    
-    console.log("\n✅ All evals passed or in pre-production phase");
+
+    console.log('\n✅ All evals passed or in pre-production phase');
   } else {
     console.log();
-    p.outro(anyFailure ? "Some evals need attention" : "All evals passed!");
+    p.outro(anyFailure ? 'Some evals need attention' : 'All evals passed!');
   }
 }
 
@@ -5673,17 +5871,18 @@ async function evalRun() {
 // ============================================================================
 
 async function serve() {
-  p.intro("swarm serve v" + VERSION);
+  p.intro('swarm serve v' + VERSION);
 
   // Parse --port flag (default 4483 - HIVE on phone keypad)
-  const portFlagIndex = process.argv.indexOf("--port");
-  const port = portFlagIndex !== -1 
-    ? Number.parseInt(process.argv[portFlagIndex + 1]) || 4483
-    : 4483;
+  const portFlagIndex = process.argv.indexOf('--port');
+  const port =
+    portFlagIndex !== -1
+      ? Number.parseInt(process.argv[portFlagIndex + 1]) || 4483
+      : 4483;
 
   const projectPath = process.cwd();
 
-  p.log.step("Starting DurableStreamServer...");
+  p.log.step('Starting DurableStreamServer...');
   p.log.message(dim(`  Project: ${projectPath}`));
   p.log.message(dim(`  Port: ${port} (HIVE on phone keypad)`));
 
@@ -5693,14 +5892,14 @@ async function serve() {
 
     // Get swarm-mail adapter
     const swarmMail = await getSwarmMailLibSQL(projectPath);
-    
+
     // Create stream adapter
     const streamAdapter = createDurableStreamAdapter(swarmMail, projectPath);
-    
+
     // Create hive adapter for cells endpoint
     const db = await swarmMail.getDatabase(projectPath);
     const hiveAdapter = createHiveAdapter(db, projectPath);
-    
+
     // Create and start server
     const server = createDurableStreamServer({
       adapter: streamAdapter,
@@ -5711,20 +5910,24 @@ async function serve() {
 
     await server.start();
 
-    p.log.success("Server started!");
-    p.log.message("");
+    p.log.success('Server started!');
+    p.log.message('');
     p.log.message(cyan(`  Dashboard: http://localhost:5173`));
-    p.log.message(cyan(`  SSE Endpoint: ${server.url}/streams/${encodeURIComponent(projectPath)}`));
+    p.log.message(
+      cyan(
+        `  SSE Endpoint: ${server.url}/streams/${encodeURIComponent(projectPath)}`,
+      ),
+    );
     p.log.message(cyan(`  Cells API: ${server.url}/cells`));
-    p.log.message("");
-    p.log.message(dim("  Press Ctrl+C to stop"));
+    p.log.message('');
+    p.log.message(dim('  Press Ctrl+C to stop'));
 
     // Keep process alive
     await new Promise(() => {});
   } catch (error) {
-    p.log.error("Failed to start server");
+    p.log.error('Failed to start server');
     p.log.message(error instanceof Error ? error.message : String(error));
-    p.outro("Aborted");
+    p.outro('Aborted');
     process.exit(1);
   }
 }
@@ -5734,17 +5937,18 @@ async function serve() {
 // ============================================================================
 
 async function viz() {
-  p.intro("swarm viz v" + VERSION);
+  p.intro('swarm viz v' + VERSION);
 
   // Parse --port flag (default 4483 - HIVE on phone keypad)
-  const portFlagIndex = process.argv.indexOf("--port");
-  const port = portFlagIndex !== -1 
-    ? Number.parseInt(process.argv[portFlagIndex + 1]) || 4483
-    : 4483;
+  const portFlagIndex = process.argv.indexOf('--port');
+  const port =
+    portFlagIndex !== -1
+      ? Number.parseInt(process.argv[portFlagIndex + 1]) || 4483
+      : 4483;
 
   const projectPath = process.cwd();
 
-  p.log.step("Starting dashboard server...");
+  p.log.step('Starting dashboard server...');
   p.log.message(dim(`  Project: ${projectPath}`));
   p.log.message(dim(`  Port: ${port}`));
 
@@ -5754,14 +5958,14 @@ async function viz() {
 
     // Get swarm-mail adapter
     const swarmMail = await getSwarmMailLibSQL(projectPath);
-    
+
     // Create stream adapter
     const streamAdapter = createDurableStreamAdapter(swarmMail, projectPath);
-    
+
     // Create hive adapter for cells endpoint
     const db = await swarmMail.getDatabase(projectPath);
     const hiveAdapter = createHiveAdapter(db, projectPath);
-    
+
     // Create and start server
     const server = createDurableStreamServer({
       adapter: streamAdapter,
@@ -5772,20 +5976,24 @@ async function viz() {
 
     await server.start();
 
-    p.log.success("Dashboard server running!");
-    p.log.message("");
+    p.log.success('Dashboard server running!');
+    p.log.message('');
     p.log.message(cyan(`  Dashboard: http://localhost:${port}`));
-    p.log.message(cyan(`  SSE endpoint: http://localhost:${port}/streams/${encodeURIComponent(projectPath)}`));
+    p.log.message(
+      cyan(
+        `  SSE endpoint: http://localhost:${port}/streams/${encodeURIComponent(projectPath)}`,
+      ),
+    );
     p.log.message(cyan(`  Cells API: http://localhost:${port}/cells`));
-    p.log.message("");
-    p.log.message(dim("  Press Ctrl+C to stop"));
+    p.log.message('');
+    p.log.message(dim('  Press Ctrl+C to stop'));
 
     // Keep process alive
     await new Promise(() => {});
   } catch (error) {
-    p.log.error("Failed to start dashboard server");
+    p.log.error('Failed to start dashboard server');
     p.log.message(error instanceof Error ? error.message : String(error));
-    p.outro("Aborted");
+    p.outro('Aborted');
     process.exit(1);
   }
 }
@@ -5796,57 +6004,67 @@ async function viz() {
 
 /**
  * Capture command - called by plugin wrapper to record eval events
- * 
+ *
  * Usage:
  *   swarm capture --session <id> --epic <id> --type <type> --payload <json>
- * 
+ *
  * This allows the plugin wrapper to shell out instead of importing,
  * avoiding version mismatch issues when the plugin is installed globally.
  */
 async function capture() {
   const args = process.argv.slice(3);
-  
+
   let sessionId: string | null = null;
   let epicId: string | null = null;
   let compactionType: string | null = null;
   let payloadJson: string | null = null;
-  
+
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    
-    if ((arg === "--session" || arg === "-s") && i + 1 < args.length) {
+
+    if ((arg === '--session' || arg === '-s') && i + 1 < args.length) {
       sessionId = args[++i];
-    } else if ((arg === "--epic" || arg === "-e") && i + 1 < args.length) {
+    } else if ((arg === '--epic' || arg === '-e') && i + 1 < args.length) {
       epicId = args[++i];
-    } else if ((arg === "--type" || arg === "-t") && i + 1 < args.length) {
+    } else if ((arg === '--type' || arg === '-t') && i + 1 < args.length) {
       compactionType = args[++i];
-    } else if ((arg === "--payload" || arg === "-p") && i + 1 < args.length) {
+    } else if ((arg === '--payload' || arg === '-p') && i + 1 < args.length) {
       payloadJson = args[++i];
     }
   }
-  
+
   // Validate required args
   if (!sessionId || !epicId || !compactionType) {
-    console.error("Usage: swarm capture --session <id> --epic <id> --type <type> [--payload <json>]");
-    console.error("");
-    console.error("Required:");
-    console.error("  --session, -s  Session ID");
-    console.error("  --epic, -e     Epic ID");
-    console.error("  --type, -t     Compaction type (detection_complete, prompt_generated, context_injected, resumption_started, tool_call_tracked)");
-    console.error("");
-    console.error("Optional:");
-    console.error("  --payload, -p  JSON payload");
+    console.error(
+      'Usage: swarm capture --session <id> --epic <id> --type <type> [--payload <json>]',
+    );
+    console.error('');
+    console.error('Required:');
+    console.error('  --session, -s  Session ID');
+    console.error('  --epic, -e     Epic ID');
+    console.error(
+      '  --type, -t     Compaction type (detection_complete, prompt_generated, context_injected, resumption_started, tool_call_tracked)',
+    );
+    console.error('');
+    console.error('Optional:');
+    console.error('  --payload, -p  JSON payload');
     process.exit(1);
   }
-  
+
   // Validate compaction type
-  const validTypes = ["detection_complete", "prompt_generated", "context_injected", "resumption_started", "tool_call_tracked"];
+  const validTypes = [
+    'detection_complete',
+    'prompt_generated',
+    'context_injected',
+    'resumption_started',
+    'tool_call_tracked',
+  ];
   if (!validTypes.includes(compactionType)) {
     console.error(`Invalid compaction type: ${compactionType}`);
-    console.error(`Valid types: ${validTypes.join(", ")}`);
+    console.error(`Valid types: ${validTypes.join(', ')}`);
     process.exit(1);
   }
-  
+
   // Parse payload
   let payload: any = {};
   if (payloadJson) {
@@ -5857,7 +6075,7 @@ async function capture() {
       process.exit(1);
     }
   }
-  
+
   // Capture the event
   try {
     captureCompactionEvent({
@@ -5866,7 +6084,7 @@ async function capture() {
       compaction_type: compactionType as any,
       payload,
     });
-    
+
     // Silent success - this is a fire-and-forget operation
     // Only output on error to avoid polluting logs
   } catch (error) {
@@ -5883,7 +6101,10 @@ async function capture() {
 /**
  * Parse args for memory commands
  */
-function parseMemoryArgs(subcommand: string, args: string[]): {
+function parseMemoryArgs(
+  subcommand: string,
+  args: string[],
+): {
   json: boolean;
   info?: string;
   query?: string;
@@ -5901,26 +6122,30 @@ function parseMemoryArgs(subcommand: string, args: string[]): {
   let collection: string | undefined;
 
   // First positional arg for store/find/get/remove/validate
-  if (args.length > 0 && !args[0].startsWith("--")) {
-    if (subcommand === "store") {
+  if (args.length > 0 && !args[0].startsWith('--')) {
+    if (subcommand === 'store') {
       info = args[0];
-    } else if (subcommand === "find") {
+    } else if (subcommand === 'find') {
       query = args[0];
-    } else if (subcommand === "get" || subcommand === "remove" || subcommand === "validate") {
+    } else if (
+      subcommand === 'get' ||
+      subcommand === 'remove' ||
+      subcommand === 'validate'
+    ) {
       id = args[0];
     }
   }
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg === "--json") {
+    if (arg === '--json') {
       json = true;
-    } else if (arg === "--tags" && i + 1 < args.length) {
+    } else if (arg === '--tags' && i + 1 < args.length) {
       tags = args[++i];
-    } else if (arg === "--limit" && i + 1 < args.length) {
+    } else if (arg === '--limit' && i + 1 < args.length) {
       const val = parseInt(args[++i], 10);
       if (!isNaN(val)) limit = val;
-    } else if (arg === "--collection" && i + 1 < args.length) {
+    } else if (arg === '--collection' && i + 1 < args.length) {
       collection = args[++i];
     }
   }
@@ -5930,7 +6155,7 @@ function parseMemoryArgs(subcommand: string, args: string[]): {
 
 /**
  * Memory command - unified interface to memory operations
- * 
+ *
  * Commands:
  *   swarm memory store <info> [--tags <tags>]
  *   swarm memory find <query> [--limit <n>] [--collection <name>]
@@ -5953,7 +6178,7 @@ async function memory() {
     // Get database instance using getDb from swarm-mail
     // This returns a drizzle instance (SwarmDb) that memory adapter expects
     // IMPORTANT: Memory is global, not per-project. Use getGlobalDbPath().
-    const { getDb, getGlobalDbPath } = await import("swarm-mail");
+    const { getDb, getGlobalDbPath } = await import('swarm-mail');
 
     const globalDbPath = getGlobalDbPath();
     const globalDbDir = dirname(globalDbPath);
@@ -5967,42 +6192,46 @@ async function memory() {
     const dbUrl = `file://${globalDbPath}`;
 
     const db = await getDb(dbUrl);
-    
+
     // Create memory adapter with default Ollama config
-    const { createMemoryAdapter } = await import("swarm-mail");
+    const { createMemoryAdapter } = await import('swarm-mail');
     const adapter = createMemoryAdapter(db, {
-      ollamaHost: process.env.OLLAMA_HOST || "http://localhost:11434",
-      ollamaModel: process.env.OLLAMA_MODEL || "mxbai-embed-large",
+      ollamaHost: process.env.OLLAMA_HOST || 'http://localhost:11434',
+      ollamaModel: process.env.OLLAMA_MODEL || 'mxbai-embed-large',
     });
 
     switch (subcommand) {
-      case "store": {
+      case 'store': {
         if (!parsed.info) {
-          console.error("Usage: swarm memory store <information> [--tags <tags>]");
+          console.error(
+            'Usage: swarm memory store <information> [--tags <tags>]',
+          );
           process.exit(1);
         }
 
         const result = await adapter.store(parsed.info, {
           tags: parsed.tags,
-          collection: parsed.collection || "default",
+          collection: parsed.collection || 'default',
         });
 
         if (parsed.json) {
           console.log(JSON.stringify({ success: true, id: result.id }));
         } else {
-          p.intro("swarm memory store");
+          p.intro('swarm memory store');
           p.log.success(`Stored memory: ${result.id}`);
           if (result.autoTags) {
-            p.log.message(`Auto-tags: ${result.autoTags.tags.join(", ")}`);
+            p.log.message(`Auto-tags: ${result.autoTags.tags.join(', ')}`);
           }
-          p.outro("Done");
+          p.outro('Done');
         }
         break;
       }
 
-      case "find": {
+      case 'find': {
         if (!parsed.query) {
-          console.error("Usage: swarm memory find <query> [--limit <n>] [--collection <name>]");
+          console.error(
+            'Usage: swarm memory find <query> [--limit <n>] [--collection <name>]',
+          );
           process.exit(1);
         }
 
@@ -6016,15 +6245,27 @@ async function memory() {
         } else {
           p.intro(`swarm memory find: "${parsed.query}"`);
           if (results.length === 0) {
-            p.log.warn("No memories found");
+            p.log.warn('No memories found');
           } else {
             for (const result of results) {
               console.log();
-              console.log(cyan(`[${result.memory.id}] Score: ${result.score.toFixed(3)}`));
-              console.log(dim(`  Created: ${new Date(result.memory.createdAt).toLocaleDateString()}`));
-              console.log(`  ${result.memory.content.slice(0, 200)}${result.memory.content.length > 200 ? "..." : ""}`);
+              console.log(
+                cyan(`[${result.memory.id}] Score: ${result.score.toFixed(3)}`),
+              );
+              console.log(
+                dim(
+                  `  Created: ${new Date(result.memory.createdAt).toLocaleDateString()}`,
+                ),
+              );
+              console.log(
+                `  ${result.memory.content.slice(0, 200)}${result.memory.content.length > 200 ? '...' : ''}`,
+              );
               if (result.memory.metadata.tags) {
-                console.log(dim(`  Tags: ${(result.memory.metadata.tags as string[]).join(", ")}`));
+                console.log(
+                  dim(
+                    `  Tags: ${(result.memory.metadata.tags as string[]).join(', ')}`,
+                  ),
+                );
               }
             }
           }
@@ -6033,9 +6274,9 @@ async function memory() {
         break;
       }
 
-      case "get": {
+      case 'get': {
         if (!parsed.id) {
-          console.error("Usage: swarm memory get <id>");
+          console.error('Usage: swarm memory get <id>');
           process.exit(1);
         }
 
@@ -6045,35 +6286,43 @@ async function memory() {
           if (memory) {
             console.log(JSON.stringify({ success: true, memory }));
           } else {
-            console.log(JSON.stringify({ success: false, error: "Memory not found" }));
+            console.log(
+              JSON.stringify({ success: false, error: 'Memory not found' }),
+            );
             process.exit(1);
           }
         } else {
           p.intro(`swarm memory get: ${parsed.id}`);
           if (!memory) {
-            p.log.error("Memory not found");
-            p.outro("Aborted");
+            p.log.error('Memory not found');
+            p.outro('Aborted');
             process.exit(1);
           } else {
             console.log();
-            console.log(cyan("Content:"));
+            console.log(cyan('Content:'));
             console.log(memory.content);
             console.log();
-            console.log(dim(`Created: ${new Date(memory.createdAt).toLocaleDateString()}`));
+            console.log(
+              dim(
+                `Created: ${new Date(memory.createdAt).toLocaleDateString()}`,
+              ),
+            );
             console.log(dim(`Collection: ${memory.collection}`));
             console.log(dim(`Confidence: ${memory.confidence ?? 0.7}`));
             if (memory.metadata.tags) {
-              console.log(dim(`Tags: ${(memory.metadata.tags as string[]).join(", ")}`));
+              console.log(
+                dim(`Tags: ${(memory.metadata.tags as string[]).join(', ')}`),
+              );
             }
-            p.outro("Done");
+            p.outro('Done');
           }
         }
         break;
       }
 
-      case "remove": {
+      case 'remove': {
         if (!parsed.id) {
-          console.error("Usage: swarm memory remove <id>");
+          console.error('Usage: swarm memory remove <id>');
           process.exit(1);
         }
 
@@ -6082,16 +6331,16 @@ async function memory() {
         if (parsed.json) {
           console.log(JSON.stringify({ success: true }));
         } else {
-          p.intro("swarm memory remove");
+          p.intro('swarm memory remove');
           p.log.success(`Removed memory: ${parsed.id}`);
-          p.outro("Done");
+          p.outro('Done');
         }
         break;
       }
 
-      case "validate": {
+      case 'validate': {
         if (!parsed.id) {
-          console.error("Usage: swarm memory validate <id>");
+          console.error('Usage: swarm memory validate <id>');
           process.exit(1);
         }
 
@@ -6100,88 +6349,114 @@ async function memory() {
         if (parsed.json) {
           console.log(JSON.stringify({ success: true }));
         } else {
-          p.intro("swarm memory validate");
+          p.intro('swarm memory validate');
           p.log.success(`Validated memory: ${parsed.id} (decay timer reset)`);
-          p.outro("Done");
+          p.outro('Done');
         }
         break;
       }
 
-      case "stats": {
+      case 'stats': {
         const stats = await adapter.stats();
 
         if (parsed.json) {
           console.log(JSON.stringify({ success: true, stats }));
         } else {
-          p.intro("swarm memory stats");
+          p.intro('swarm memory stats');
           console.log();
-          console.log(cyan("Database Statistics:"));
+          console.log(cyan('Database Statistics:'));
           console.log(`  Memories: ${stats.memories}`);
           console.log(`  Embeddings: ${stats.embeddings}`);
-          p.outro("Done");
+          p.outro('Done');
         }
         break;
       }
 
-      case "index": {
+      case 'index': {
         // Index is a stub - actual indexing happens via session indexing
         // which is handled by hivemind_index tool
         if (parsed.json) {
-          console.log(JSON.stringify({ success: true, message: "Use hivemind_index tool for session indexing" }));
+          console.log(
+            JSON.stringify({
+              success: true,
+              message: 'Use hivemind_index tool for session indexing',
+            }),
+          );
         } else {
-          p.intro("swarm memory index");
-          p.log.message("Session indexing is handled by the hivemind_index tool");
-          p.log.message("Use: swarm tool hivemind_index");
-          p.outro("Done");
+          p.intro('swarm memory index');
+          p.log.message(
+            'Session indexing is handled by the hivemind_index tool',
+          );
+          p.log.message('Use: swarm tool hivemind_index');
+          p.outro('Done');
         }
         break;
       }
 
-      case "sync": {
+      case 'sync': {
         // Sync is a stub - actual sync happens via .hive/memories.jsonl
         // which is handled by hivemind_sync tool
         if (parsed.json) {
-          console.log(JSON.stringify({ success: true, message: "Use hivemind_sync tool for git sync" }));
+          console.log(
+            JSON.stringify({
+              success: true,
+              message: 'Use hivemind_sync tool for git sync',
+            }),
+          );
         } else {
-          p.intro("swarm memory sync");
-          p.log.message("Memory sync to .hive/memories.jsonl is handled by the hivemind_sync tool");
-          p.log.message("Use: swarm tool hivemind_sync");
-          p.outro("Done");
+          p.intro('swarm memory sync');
+          p.log.message(
+            'Memory sync to .hive/memories.jsonl is handled by the hivemind_sync tool',
+          );
+          p.log.message('Use: swarm tool hivemind_sync');
+          p.outro('Done');
         }
         break;
       }
 
       default: {
         console.error(`Unknown subcommand: ${subcommand}`);
-        console.error("");
-        console.error("Usage: swarm memory <subcommand> [options]");
-        console.error("");
-        console.error("Subcommands:");
-        console.error("  store <info> [--tags <tags>]         Store a memory");
-        console.error("  find <query> [--limit <n>]           Search memories");
-        console.error("  get <id>                             Get memory by ID");
-        console.error("  remove <id>                          Delete memory");
-        console.error("  validate <id>                        Reset decay timer");
-        console.error("  stats                                Show database stats");
-        console.error("  index                                Index sessions (use hivemind_index)");
-        console.error("  sync                                 Sync to git (use hivemind_sync)");
-        console.error("");
-        console.error("Global options:");
-        console.error("  --json                               Output JSON");
+        console.error('');
+        console.error('Usage: swarm memory <subcommand> [options]');
+        console.error('');
+        console.error('Subcommands:');
+        console.error('  store <info> [--tags <tags>]         Store a memory');
+        console.error('  find <query> [--limit <n>]           Search memories');
+        console.error(
+          '  get <id>                             Get memory by ID',
+        );
+        console.error('  remove <id>                          Delete memory');
+        console.error(
+          '  validate <id>                        Reset decay timer',
+        );
+        console.error(
+          '  stats                                Show database stats',
+        );
+        console.error(
+          '  index                                Index sessions (use hivemind_index)',
+        );
+        console.error(
+          '  sync                                 Sync to git (use hivemind_sync)',
+        );
+        console.error('');
+        console.error('Global options:');
+        console.error('  --json                               Output JSON');
         process.exit(1);
       }
     }
   } catch (error) {
     if (parsed.json) {
-      console.log(JSON.stringify({
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-      }));
+      console.log(
+        JSON.stringify({
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
       process.exit(1);
     } else {
-      p.log.error("Memory operation failed");
+      p.log.error('Memory operation failed');
       p.log.message(error instanceof Error ? error.message : String(error));
-      p.outro("Aborted");
+      p.outro('Aborted');
       process.exit(1);
     }
   }
@@ -6198,70 +6473,70 @@ async function claudeCommand() {
   const args = process.argv.slice(3);
   const subcommand = args[0];
 
-  if (!subcommand || ["help", "--help", "-h"].includes(subcommand)) {
+  if (!subcommand || ['help', '--help', '-h'].includes(subcommand)) {
     showClaudeHelp();
     return;
   }
 
   switch (subcommand) {
-    case "path":
+    case 'path':
       claudePath();
       break;
-    case "install":
+    case 'install':
       await claudeInstall();
       break;
-    case "uninstall":
+    case 'uninstall':
       await claudeUninstall();
       break;
-    case "init":
+    case 'init':
       await claudeInit();
       break;
-    case "session-start":
+    case 'session-start':
       await claudeSessionStart();
       break;
-    case "user-prompt":
+    case 'user-prompt':
       await claudeUserPrompt();
       break;
-    case "pre-edit":
+    case 'pre-edit':
       await claudePreEdit();
       break;
-    case "pre-complete":
+    case 'pre-complete':
       await claudePreComplete();
       break;
-    case "post-complete":
+    case 'post-complete':
       await claudePostComplete();
       break;
-    case "pre-compact":
+    case 'pre-compact':
       await claudePreCompact();
       break;
-    case "session-end":
+    case 'session-end':
       await claudeSessionEnd();
       break;
-    case "track-tool":
+    case 'track-tool':
       await claudeTrackTool(Bun.argv[4]); // tool name is 4th arg
       break;
-    case "compliance":
+    case 'compliance':
       await claudeCompliance();
       break;
-    case "skill-reload":
+    case 'skill-reload':
       await claudeSkillReload();
       break;
-    case "coordinator-start":
+    case 'coordinator-start':
       await claudeCoordinatorStart();
       break;
-    case "worker-start":
+    case 'worker-start':
       await claudeWorkerStart();
       break;
-    case "subagent-stop":
+    case 'subagent-stop':
       await claudeSubagentStop();
       break;
-    case "agent-stop":
+    case 'agent-stop':
       await claudeAgentStop();
       break;
-    case "track-task":
+    case 'track-task':
       await claudeTrackTask();
       break;
-    case "post-task-update":
+    case 'post-task-update':
       await claudePostTaskUpdate();
       break;
     default:
@@ -6315,16 +6590,16 @@ function claudePath() {
  * Install the Claude plugin symlink for local development.
  */
 async function claudeInstall() {
-  p.intro("swarm claude install");
+  p.intro('swarm claude install');
   const pluginRoot = getClaudePluginRoot();
   if (!existsSync(pluginRoot)) {
     p.log.error(`Claude plugin not found at ${pluginRoot}`);
-    p.outro("Aborted");
+    p.outro('Aborted');
     process.exit(1);
   }
 
   const claudeConfigDir = getClaudeConfigDir();
-  const pluginsDir = join(claudeConfigDir, "plugins");
+  const pluginsDir = join(claudeConfigDir, 'plugins');
   const pluginPath = join(pluginsDir, CLAUDE_PLUGIN_NAME);
 
   mkdirWithStatus(pluginsDir);
@@ -6333,15 +6608,15 @@ async function claudeInstall() {
     const stat = lstatSync(pluginPath);
     if (!stat.isSymbolicLink()) {
       p.log.error(`Existing path is not a symlink: ${pluginPath}`);
-      p.outro("Aborted");
+      p.outro('Aborted');
       process.exit(1);
     }
 
     const target = readlinkSync(pluginPath);
     const resolved = resolve(dirname(pluginPath), target);
     if (resolved === pluginRoot) {
-      p.log.success("Claude plugin already linked");
-      p.outro("Done");
+      p.log.success('Claude plugin already linked');
+      p.outro('Done');
       return;
     }
 
@@ -6350,57 +6625,63 @@ async function claudeInstall() {
 
   symlinkSync(pluginRoot, pluginPath);
   p.log.success(`Linked ${CLAUDE_PLUGIN_NAME} → ${pluginRoot}`);
-  p.log.message(dim("  Claude Code will auto-launch MCP from .mcp.json"));
-  p.outro("Claude plugin installed");
+  p.log.message(dim('  Claude Code will auto-launch MCP from .mcp.json'));
+  p.outro('Claude plugin installed');
 }
 
 /**
  * Remove the Claude plugin symlink.
  */
 async function claudeUninstall() {
-  p.intro("swarm claude uninstall");
-  const pluginPath = join(getClaudeConfigDir(), "plugins", CLAUDE_PLUGIN_NAME);
+  p.intro('swarm claude uninstall');
+  const pluginPath = join(getClaudeConfigDir(), 'plugins', CLAUDE_PLUGIN_NAME);
 
   if (!existsSync(pluginPath)) {
-    p.log.warn("Claude plugin symlink not found");
-    p.outro("Nothing to remove");
+    p.log.warn('Claude plugin symlink not found');
+    p.outro('Nothing to remove');
     return;
   }
 
   rmSync(pluginPath, { recursive: true, force: true });
   p.log.success(`Removed ${pluginPath}`);
-  p.outro("Claude plugin uninstalled");
+  p.outro('Claude plugin uninstalled');
 }
 
 /**
  * Create project-local Claude Code config from bundled plugin assets.
  */
 async function claudeInit() {
-  p.intro("swarm claude init");
+  p.intro('swarm claude init');
   const projectPath = process.cwd();
   const pluginRoot = getClaudePluginRoot();
 
   if (!existsSync(pluginRoot)) {
     p.log.error(`Claude plugin not found at ${pluginRoot}`);
-    p.outro("Aborted");
+    p.outro('Aborted');
     process.exit(1);
   }
 
-  const projectClaudeDir = join(projectPath, ".claude");
-  const commandDir = join(projectClaudeDir, "commands");
-  const agentDir = join(projectClaudeDir, "agents");
-  const skillsDir = join(projectClaudeDir, "skills");
-  const hooksDir = join(projectClaudeDir, "hooks");
+  const projectClaudeDir = join(projectPath, '.claude');
+  const commandDir = join(projectClaudeDir, 'commands');
+  const agentDir = join(projectClaudeDir, 'agents');
+  const skillsDir = join(projectClaudeDir, 'skills');
+  const hooksDir = join(projectClaudeDir, 'hooks');
 
-  for (const dir of [projectClaudeDir, commandDir, agentDir, skillsDir, hooksDir]) {
+  for (const dir of [
+    projectClaudeDir,
+    commandDir,
+    agentDir,
+    skillsDir,
+    hooksDir,
+  ]) {
     mkdirWithStatus(dir);
   }
 
   const copyMap = [
-    { src: join(pluginRoot, "commands"), dest: commandDir, label: "Commands" },
-    { src: join(pluginRoot, "agents"), dest: agentDir, label: "Agents" },
-    { src: join(pluginRoot, "skills"), dest: skillsDir, label: "Skills" },
-    { src: join(pluginRoot, "hooks"), dest: hooksDir, label: "Hooks" },
+    { src: join(pluginRoot, 'commands'), dest: commandDir, label: 'Commands' },
+    { src: join(pluginRoot, 'agents'), dest: agentDir, label: 'Agents' },
+    { src: join(pluginRoot, 'skills'), dest: skillsDir, label: 'Skills' },
+    { src: join(pluginRoot, 'hooks'), dest: hooksDir, label: 'Hooks' },
   ];
 
   for (const { src, dest, label } of copyMap) {
@@ -6410,22 +6691,22 @@ async function claudeInit() {
     }
   }
 
-  const mcpSourcePath = join(pluginRoot, ".mcp.json");
+  const mcpSourcePath = join(pluginRoot, '.mcp.json');
   if (existsSync(mcpSourcePath)) {
-    const mcpDestPath = join(projectClaudeDir, ".mcp.json");
-    const content = readFileSync(mcpSourcePath, "utf-8");
-    writeFileWithStatus(mcpDestPath, content, "MCP config");
+    const mcpDestPath = join(projectClaudeDir, '.mcp.json');
+    const content = readFileSync(mcpSourcePath, 'utf-8');
+    writeFileWithStatus(mcpDestPath, content, 'MCP config');
   }
 
-  const lspSourcePath = join(pluginRoot, ".lsp.json");
+  const lspSourcePath = join(pluginRoot, '.lsp.json');
   if (existsSync(lspSourcePath)) {
-    const lspDestPath = join(projectClaudeDir, ".lsp.json");
-    const content = readFileSync(lspSourcePath, "utf-8");
-    writeFileWithStatus(lspDestPath, content, "LSP config");
+    const lspDestPath = join(projectClaudeDir, '.lsp.json');
+    const content = readFileSync(lspSourcePath, 'utf-8');
+    writeFileWithStatus(lspDestPath, content, 'LSP config');
   }
 
-  p.log.message(dim("  Uses ${CLAUDE_PLUGIN_ROOT} in MCP config"));
-  p.outro("Claude project config ready");
+  p.log.message(dim('  Uses ${CLAUDE_PLUGIN_ROOT} in MCP config'));
+  p.outro('Claude project config ready');
 }
 
 /**
@@ -6452,36 +6733,45 @@ async function claudeSessionStart() {
 
     // Session basics
     contextLines.push(`## Swarm Session: ${session.id}`);
-    contextLines.push(`Source: ${(input as { source?: string }).source || "startup"}`);
-    contextLines.push("");
+    contextLines.push(
+      `Source: ${(input as { source?: string }).source || 'startup'}`,
+    );
+    contextLines.push('');
 
     // Previous handoff notes (critical for continuation)
     if (session.previous_handoff_notes) {
-      contextLines.push("## Previous Handoff Notes");
+      contextLines.push('## Previous Handoff Notes');
       contextLines.push(session.previous_handoff_notes);
-      contextLines.push("");
+      contextLines.push('');
     }
 
     // Active cell from previous session
     if (session.active_cell_id) {
-      const activeCell = await adapter.getCell(projectPath, session.active_cell_id);
+      const activeCell = await adapter.getCell(
+        projectPath,
+        session.active_cell_id,
+      );
       if (activeCell) {
-        contextLines.push("## Active Cell (from previous session)");
+        contextLines.push('## Active Cell (from previous session)');
         contextLines.push(`- **${activeCell.id}**: ${activeCell.title}`);
-        contextLines.push(`  Status: ${activeCell.status}, Priority: ${activeCell.priority}`);
+        contextLines.push(
+          `  Status: ${activeCell.status}, Priority: ${activeCell.priority}`,
+        );
         if (activeCell.description) {
           contextLines.push(`  ${activeCell.description.slice(0, 200)}...`);
         }
-        contextLines.push("");
+        contextLines.push('');
       }
     }
 
     // In-progress cells (work that was mid-flight)
     const inProgressCells = await adapter.getInProgressCells(projectPath);
     if (inProgressCells.length > 0) {
-      contextLines.push("## In-Progress Work");
+      contextLines.push('## In-Progress Work');
       for (const cell of inProgressCells.slice(0, 5)) {
-        contextLines.push(`- **${cell.id}**: ${cell.title} (${cell.type}, P${cell.priority})`);
+        contextLines.push(
+          `- **${cell.id}**: ${cell.title} (${cell.type}, P${cell.priority})`,
+        );
         if (cell.description) {
           contextLines.push(`  ${cell.description.slice(0, 150)}`);
         }
@@ -6489,32 +6779,36 @@ async function claudeSessionStart() {
       if (inProgressCells.length > 5) {
         contextLines.push(`  ... and ${inProgressCells.length - 5} more`);
       }
-      contextLines.push("");
+      contextLines.push('');
     }
 
     // Open epics (high-level context)
     const openEpics = await adapter.queryCells(projectPath, {
-      status: "open",
-      type: "epic",
-      limit: 3
+      status: 'open',
+      type: 'epic',
+      limit: 3,
     });
     if (openEpics.length > 0) {
-      contextLines.push("## Open Epics");
+      contextLines.push('## Open Epics');
       for (const epic of openEpics) {
         const children = await adapter.getEpicChildren(projectPath, epic.id);
-        const openChildren = children.filter(c => c.status !== "closed");
+        const openChildren = children.filter((c) => c.status !== 'closed');
         contextLines.push(`- **${epic.id}**: ${epic.title}`);
-        contextLines.push(`  ${openChildren.length}/${children.length} subtasks remaining`);
+        contextLines.push(
+          `  ${openChildren.length}/${children.length} subtasks remaining`,
+        );
       }
-      contextLines.push("");
+      contextLines.push('');
     }
 
     // Stats summary
     const stats = await adapter.getCellsStats(projectPath);
-    contextLines.push("## Hive Stats");
-    contextLines.push(`Open: ${stats.open} | In Progress: ${stats.in_progress} | Blocked: ${stats.blocked} | Closed: ${stats.closed}`);
+    contextLines.push('## Hive Stats');
+    contextLines.push(
+      `Open: ${stats.open} | In Progress: ${stats.in_progress} | Blocked: ${stats.blocked} | Closed: ${stats.closed}`,
+    );
 
-    writeClaudeHookOutput("SessionStart", contextLines.join("\n"));
+    writeClaudeHookOutput('SessionStart', contextLines.join('\n'));
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
   }
@@ -6547,14 +6841,14 @@ async function claudeUserPrompt() {
 
     // Always inject current timestamp for temporal awareness
     const now = new Date();
-    const timestamp = now.toLocaleString("en-US", {
-      weekday: "short",
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      timeZoneName: "short",
+    const timestamp = now.toLocaleString('en-US', {
+      weekday: 'short',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZoneName: 'short',
     });
     contextLines.push(`**Now**: ${timestamp}`);
 
@@ -6562,20 +6856,27 @@ async function claudeUserPrompt() {
     if (input.prompt && input.prompt.trim().length > 10) {
       try {
         const memoryAdapter = await createMemoryAdapter(db);
-        const findResult = await memoryAdapter.find({ query: input.prompt, limit: 3 });
+        const findResult = await memoryAdapter.find({
+          query: input.prompt,
+          limit: 3,
+        });
         const memories = findResult.results;
 
         if (memories && memories.length > 0) {
           // Only include high-confidence matches (score > 0.5)
-          const relevant = memories.filter((m: { score?: number }) => (m.score ?? 0) > 0.5);
+          const relevant = memories.filter(
+            (m: { score?: number }) => (m.score ?? 0) > 0.5,
+          );
           if (relevant.length > 0) {
             const memorySnippets = relevant
               .slice(0, 2) // Max 2 memories to keep context light
               .map((m: { content?: string; information?: string }) => {
-                const content = m.content || m.information || "";
-                return content.length > 200 ? content.slice(0, 200) + "..." : content;
+                const content = m.content || m.information || '';
+                return content.length > 200
+                  ? content.slice(0, 200) + '...'
+                  : content;
               })
-              .join(" | ");
+              .join(' | ');
             contextLines.push(`**Recall**: ${memorySnippets}`);
           }
         }
@@ -6586,8 +6887,11 @@ async function claudeUserPrompt() {
 
     // Current active cell (most relevant context)
     if (session.active_cell_id) {
-      const activeCell = await adapter.getCell(projectPath, session.active_cell_id);
-      if (activeCell && activeCell.status !== "closed") {
+      const activeCell = await adapter.getCell(
+        projectPath,
+        session.active_cell_id,
+      );
+      if (activeCell && activeCell.status !== 'closed') {
         contextLines.push(`**Active**: ${activeCell.id} - ${activeCell.title}`);
       }
     }
@@ -6595,13 +6899,20 @@ async function claudeUserPrompt() {
     // Quick in-progress count for awareness
     const inProgress = await adapter.getInProgressCells(projectPath);
     if (inProgress.length > 0) {
-      const titles = inProgress.slice(0, 3).map(c => c.title.slice(0, 40)).join(", ");
-      contextLines.push(`**WIP (${inProgress.length})**: ${titles}${inProgress.length > 3 ? "..." : ""}`);
+      const titles = inProgress
+        .slice(0, 3)
+        .map((c) => c.title.slice(0, 40))
+        .join(', ');
+      contextLines.push(
+        `**WIP (${inProgress.length})**: ${titles}${inProgress.length > 3 ? '...' : ''}`,
+      );
     }
 
     // Only output if there's meaningful context
     if (contextLines.length > 0) {
-      writeClaudeHookOutput("UserPromptSubmit", contextLines.join(" | "), { suppressOutput: true });
+      writeClaudeHookOutput('UserPromptSubmit', contextLines.join(' | '), {
+        suppressOutput: true,
+      });
     }
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
@@ -6623,7 +6934,9 @@ async function claudeUserPrompt() {
  */
 async function claudePreCompact() {
   try {
-    const input = await readHookInput<ClaudeHookInput & { trigger?: string; custom_instructions?: string }>();
+    const input = await readHookInput<
+      ClaudeHookInput & { trigger?: string; custom_instructions?: string }
+    >();
     const projectPath = resolveClaudeProjectPath(input);
     const swarmMail = await getSwarmMailLibSQL(projectPath);
     const db = await swarmMail.getDatabase(projectPath);
@@ -6634,30 +6947,32 @@ async function claudePreCompact() {
     const session = await adapter.getCurrentSession(projectPath);
     const contextLines: string[] = [];
 
-    contextLines.push("# Swarm State Snapshot (Pre-Compaction)");
-    contextLines.push(`Trigger: ${input.trigger || "auto"}`);
+    contextLines.push('# Swarm State Snapshot (Pre-Compaction)');
+    contextLines.push(`Trigger: ${input.trigger || 'auto'}`);
     if (input.custom_instructions) {
       contextLines.push(`Instructions: ${input.custom_instructions}`);
     }
-    contextLines.push("");
+    contextLines.push('');
 
     // Session info
     if (session) {
-      contextLines.push("## Session");
+      contextLines.push('## Session');
       contextLines.push(`ID: ${session.id}`);
       if (session.active_cell_id) {
         contextLines.push(`Active cell: ${session.active_cell_id}`);
       }
     }
-    contextLines.push("");
+    contextLines.push('');
 
     // In-progress work (CRITICAL for continuation)
     const inProgressCells = await adapter.getInProgressCells(projectPath);
     if (inProgressCells.length > 0) {
-      contextLines.push("## In-Progress Work (CONTINUE THESE)");
+      contextLines.push('## In-Progress Work (CONTINUE THESE)');
       for (const cell of inProgressCells) {
         contextLines.push(`### ${cell.id}: ${cell.title}`);
-        contextLines.push(`Type: ${cell.type} | Priority: ${cell.priority} | Status: ${cell.status}`);
+        contextLines.push(
+          `Type: ${cell.type} | Priority: ${cell.priority} | Status: ${cell.status}`,
+        );
         if (cell.parent_id) {
           contextLines.push(`Parent: ${cell.parent_id}`);
         }
@@ -6668,75 +6983,81 @@ async function claudePreCompact() {
         const comments = await adapter.getComments(projectPath, cell.id);
         if (comments.length > 0) {
           const recent = comments.slice(-3);
-          contextLines.push("Recent notes:");
+          contextLines.push('Recent notes:');
           for (const comment of recent) {
             contextLines.push(`- ${comment.body.slice(0, 200)}`);
           }
         }
-        contextLines.push("");
+        contextLines.push('');
       }
     }
 
     // Open epics with children status
     const openEpics = await adapter.queryCells(projectPath, {
-      status: ["open", "in_progress"],
-      type: "epic",
-      limit: 5
+      status: ['open', 'in_progress'],
+      type: 'epic',
+      limit: 5,
     });
     if (openEpics.length > 0) {
-      contextLines.push("## Active Epics");
+      contextLines.push('## Active Epics');
       for (const epic of openEpics) {
         const children = await adapter.getEpicChildren(projectPath, epic.id);
-        const completed = children.filter(c => c.status === "closed").length;
-        const inProgress = children.filter(c => c.status === "in_progress");
-        const open = children.filter(c => c.status === "open");
+        const completed = children.filter((c) => c.status === 'closed').length;
+        const inProgress = children.filter((c) => c.status === 'in_progress');
+        const open = children.filter((c) => c.status === 'open');
 
         contextLines.push(`### ${epic.id}: ${epic.title}`);
-        contextLines.push(`Progress: ${completed}/${children.length} completed`);
+        contextLines.push(
+          `Progress: ${completed}/${children.length} completed`,
+        );
 
         if (inProgress.length > 0) {
-          contextLines.push("In progress:");
+          contextLines.push('In progress:');
           for (const c of inProgress) {
             contextLines.push(`- ${c.id}: ${c.title}`);
           }
         }
         if (open.length > 0 && open.length <= 5) {
-          contextLines.push("Remaining:");
+          contextLines.push('Remaining:');
           for (const c of open) {
             contextLines.push(`- ${c.id}: ${c.title}`);
           }
         } else if (open.length > 5) {
           contextLines.push(`Remaining: ${open.length} tasks`);
         }
-        contextLines.push("");
+        contextLines.push('');
       }
     }
 
     // Blocked cells (so Claude knows what's waiting)
     const blockedCells = await adapter.getBlockedCells(projectPath);
     if (blockedCells.length > 0) {
-      contextLines.push("## Blocked Work");
+      contextLines.push('## Blocked Work');
       for (const { cell, blockers } of blockedCells.slice(0, 5)) {
         contextLines.push(`- ${cell.id}: ${cell.title}`);
-        contextLines.push(`  Blocked by: ${blockers.join(", ")}`);
+        contextLines.push(`  Blocked by: ${blockers.join(', ')}`);
       }
-      contextLines.push("");
+      contextLines.push('');
     }
 
     // Ready cells (next work available)
     const readyCell = await adapter.getNextReadyCell(projectPath);
     if (readyCell) {
-      contextLines.push("## Next Ready Task");
-      contextLines.push(`${readyCell.id}: ${readyCell.title} (P${readyCell.priority})`);
-      contextLines.push("");
+      contextLines.push('## Next Ready Task');
+      contextLines.push(
+        `${readyCell.id}: ${readyCell.title} (P${readyCell.priority})`,
+      );
+      contextLines.push('');
     }
 
     // Stats
     const stats = await adapter.getCellsStats(projectPath);
-    contextLines.push("## Hive Stats");
-    contextLines.push(`Open: ${stats.open} | In Progress: ${stats.in_progress} | Blocked: ${stats.blocked} | Closed: ${stats.closed}`);
+    contextLines.push('## Hive Stats');
+    contextLines.push(
+      `Open: ${stats.open} | In Progress: ${stats.in_progress} | Blocked: ${stats.blocked} | Closed: ${stats.closed}`,
+    );
 
-    writeClaudeHookOutput("PreCompact", contextLines.join("\n"));
+    writeClaudeHookOutput('PreCompact', contextLines.join('\n'));
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
   }
@@ -6772,7 +7093,12 @@ async function claudeSessionEnd() {
  */
 async function claudePreEdit() {
   try {
-    const input = await readHookInput<ClaudeHookInput & { tool_name?: string; tool_input?: Record<string, unknown> }>();
+    const input = await readHookInput<
+      ClaudeHookInput & {
+        tool_name?: string;
+        tool_input?: Record<string, unknown>;
+      }
+    >();
 
     // Only inject reminder if this looks like a worker context
     // (workers have initialized via swarmmail_init)
@@ -6782,10 +7108,16 @@ async function claudePreEdit() {
     // For now, we always remind - tracking will come later
     const contextLines: string[] = [];
 
-    contextLines.push("**Before this edit**: Did you run `hivemind_find` to check for existing solutions?");
-    contextLines.push("If you haven't queried hivemind yet, consider doing so to avoid re-solving problems.");
+    contextLines.push(
+      '**Before this edit**: Did you run `hivemind_find` to check for existing solutions?',
+    );
+    contextLines.push(
+      "If you haven't queried hivemind yet, consider doing so to avoid re-solving problems.",
+    );
 
-    writeClaudeHookOutput("PreToolUse:Edit", contextLines.join("\n"), { suppressOutput: true });
+    writeClaudeHookOutput('PreToolUse:Edit', contextLines.join('\n'), {
+      suppressOutput: true,
+    });
   } catch (error) {
     // Non-fatal - don't block the edit
     console.error(error instanceof Error ? error.message : String(error));
@@ -6800,22 +7132,24 @@ async function claudePreEdit() {
  */
 async function claudePreComplete() {
   try {
-    const input = await readHookInput<ClaudeHookInput & { tool_input?: Record<string, unknown> }>();
+    const input = await readHookInput<
+      ClaudeHookInput & { tool_input?: Record<string, unknown> }
+    >();
     const projectPath = resolveClaudeProjectPath(input);
     const contextLines: string[] = [];
 
     // Check session tracking markers
-    const trackingDir = join(projectPath, ".claude", ".worker-tracking");
-    const sessionId = (input as { session_id?: string }).session_id || "";
+    const trackingDir = join(projectPath, '.claude', '.worker-tracking');
+    const sessionId = (input as { session_id?: string }).session_id || '';
     const sessionDir = join(trackingDir, sessionId.slice(0, 8));
 
     const mandatoryTools = [
-      { name: "swarmmail_init", label: "Initialize coordination" },
-      { name: "hivemind_find", label: "Query past learnings" },
+      { name: 'swarmmail_init', label: 'Initialize coordination' },
+      { name: 'hivemind_find', label: 'Query past learnings' },
     ];
     const recommendedTools = [
-      { name: "skills_use", label: "Load relevant skills" },
-      { name: "hivemind_store", label: "Store new learnings" },
+      { name: 'skills_use', label: 'Load relevant skills' },
+      { name: 'hivemind_store', label: 'Store new learnings' },
     ];
 
     const missing: string[] = [];
@@ -6836,24 +7170,26 @@ async function claudePreComplete() {
     }
 
     if (missing.length > 0) {
-      contextLines.push("**MANDATORY STEPS SKIPPED:**");
+      contextLines.push('**MANDATORY STEPS SKIPPED:**');
       for (const step of missing) {
         contextLines.push(`  - ${step}`);
       }
-      contextLines.push("");
-      contextLines.push("These steps are critical for swarm coordination.");
-      contextLines.push("Consider running `hivemind_find` before future completions.");
+      contextLines.push('');
+      contextLines.push('These steps are critical for swarm coordination.');
+      contextLines.push(
+        'Consider running `hivemind_find` before future completions.',
+      );
     }
 
     if (skippedRecommended.length > 0 && missing.length === 0) {
-      contextLines.push("**Recommended steps not observed:**");
+      contextLines.push('**Recommended steps not observed:**');
       for (const step of skippedRecommended) {
         contextLines.push(`  - ${step}`);
       }
     }
 
     if (missing.length === 0 && skippedRecommended.length === 0) {
-      contextLines.push("**All mandatory and recommended steps completed!**");
+      contextLines.push('**All mandatory and recommended steps completed!**');
     }
 
     // Emit compliance event for analytics
@@ -6865,16 +7201,20 @@ async function claudePreComplete() {
         sql: `INSERT INTO swarm_events (event_type, project_path, agent_name, epic_id, bead_id, payload, created_at)
               VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
         args: [
-          "worker_compliance",
+          'worker_compliance',
           projectPath,
-          "worker",
-          "",
-          "",
+          'worker',
+          '',
+          '',
           JSON.stringify({
             session_id: sessionId,
             mandatory_skipped: missing.length,
             recommended_skipped: skippedRecommended.length,
-            score: Math.round(((mandatoryTools.length - missing.length) / mandatoryTools.length) * 100),
+            score: Math.round(
+              ((mandatoryTools.length - missing.length) /
+                mandatoryTools.length) *
+                100,
+            ),
           }),
         ],
       });
@@ -6883,7 +7223,11 @@ async function claudePreComplete() {
     }
 
     if (contextLines.length > 0) {
-      writeClaudeHookOutput("PreToolUse:swarm_complete", contextLines.join("\n"), { suppressOutput: missing.length === 0 });
+      writeClaudeHookOutput(
+        'PreToolUse:swarm_complete',
+        contextLines.join('\n'),
+        { suppressOutput: missing.length === 0 },
+      );
     }
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
@@ -6897,19 +7241,29 @@ async function claudePreComplete() {
  */
 async function claudePostComplete() {
   try {
-    const input = await readHookInput<ClaudeHookInput & { tool_output?: string }>();
+    const input = await readHookInput<
+      ClaudeHookInput & { tool_output?: string }
+    >();
     const contextLines: string[] = [];
 
-    contextLines.push("Task completed. If you discovered anything valuable during this work:");
-    contextLines.push("```");
-    contextLines.push("hivemind_store(");
+    contextLines.push(
+      'Task completed. If you discovered anything valuable during this work:',
+    );
+    contextLines.push('```');
+    contextLines.push('hivemind_store(');
     contextLines.push('  information="<what you learned, WHY it matters>",');
     contextLines.push('  tags="<domain, pattern-type>"');
-    contextLines.push(")");
-    contextLines.push("```");
-    contextLines.push("**The swarm's collective intelligence grows when agents share learnings.**");
+    contextLines.push(')');
+    contextLines.push('```');
+    contextLines.push(
+      "**The swarm's collective intelligence grows when agents share learnings.**",
+    );
 
-    writeClaudeHookOutput("PostToolUse:swarm_complete", contextLines.join("\n"), { suppressOutput: true });
+    writeClaudeHookOutput(
+      'PostToolUse:swarm_complete',
+      contextLines.join('\n'),
+      { suppressOutput: true },
+    );
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
   }
@@ -6929,8 +7283,9 @@ async function claudeTrackTool(toolName: string) {
     const projectPath = resolveClaudeProjectPath(input);
 
     // Get or create session tracking directory
-    const trackingDir = join(projectPath, ".claude", ".worker-tracking");
-    const sessionId = (input as { session_id?: string }).session_id || `unknown-${Date.now()}`;
+    const trackingDir = join(projectPath, '.claude', '.worker-tracking');
+    const sessionId =
+      (input as { session_id?: string }).session_id || `unknown-${Date.now()}`;
     const sessionDir = join(trackingDir, sessionId.slice(0, 8)); // Use first 8 chars of session ID
 
     if (!existsSync(sessionDir)) {
@@ -6950,11 +7305,11 @@ async function claudeTrackTool(toolName: string) {
         sql: `INSERT INTO swarm_events (event_type, project_path, agent_name, epic_id, bead_id, payload, created_at)
               VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
         args: [
-          "worker_tool_call",
+          'worker_tool_call',
           projectPath,
-          "worker", // We don't have agent name in hook context
-          "",
-          "",
+          'worker', // We don't have agent name in hook context
+          '',
+          '',
           JSON.stringify({ tool: toolName, session_id: sessionId }),
         ],
       });
@@ -6963,7 +7318,9 @@ async function claudeTrackTool(toolName: string) {
     }
   } catch (error) {
     // Silent failure - don't interrupt the tool call
-    console.error(`[track-tool] ${error instanceof Error ? error.message : String(error)}`);
+    console.error(
+      `[track-tool] ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 
@@ -6977,12 +7334,12 @@ async function claudeCompliance() {
     const input = await readHookInput<ClaudeHookInput>();
     const projectPath = resolveClaudeProjectPath(input);
 
-    const trackingDir = join(projectPath, ".claude", ".worker-tracking");
-    const sessionId = (input as { session_id?: string }).session_id || "";
+    const trackingDir = join(projectPath, '.claude', '.worker-tracking');
+    const sessionId = (input as { session_id?: string }).session_id || '';
     const sessionDir = join(trackingDir, sessionId.slice(0, 8));
 
-    const mandatoryTools = ["swarmmail_init", "hivemind_find", "skills_use"];
-    const recommendedTools = ["hivemind_store"];
+    const mandatoryTools = ['swarmmail_init', 'hivemind_find', 'skills_use'];
+    const recommendedTools = ['hivemind_store'];
 
     const compliance: Record<string, boolean> = {};
 
@@ -6991,17 +7348,19 @@ async function claudeCompliance() {
       compliance[tool] = existsSync(markerPath);
     }
 
-    const mandatoryCount = mandatoryTools.filter(t => compliance[t]).length;
+    const mandatoryCount = mandatoryTools.filter((t) => compliance[t]).length;
     const score = Math.round((mandatoryCount / mandatoryTools.length) * 100);
 
-    console.log(JSON.stringify({
-      session_id: sessionId,
-      compliance,
-      mandatory_score: score,
-      mandatory_met: mandatoryCount,
-      mandatory_total: mandatoryTools.length,
-      stored_learnings: compliance.hivemind_store,
-    }));
+    console.log(
+      JSON.stringify({
+        session_id: sessionId,
+        compliance,
+        mandatory_score: score,
+        mandatory_met: mandatoryCount,
+        mandatory_total: mandatoryTools.length,
+        stored_learnings: compliance.hivemind_store,
+      }),
+    );
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
   }
@@ -7020,16 +7379,20 @@ async function claudeSkillReload() {
     const skills = await discoverSkills();
 
     // Return success with count
-    console.log(JSON.stringify({
-      success: true,
-      reloaded: skills.size,
-      message: `Reloaded ${skills.size} skill(s)`,
-    }));
+    console.log(
+      JSON.stringify({
+        success: true,
+        reloaded: skills.size,
+        message: `Reloaded ${skills.size} skill(s)`,
+      }),
+    );
   } catch (error) {
-    console.error(JSON.stringify({
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-    }));
+    console.error(
+      JSON.stringify({
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
   }
 }
 
@@ -7055,16 +7418,18 @@ async function showWorkerCompliance() {
     const rows = toolResult.rows;
 
     console.log(yellow(BANNER));
-    console.log(cyan("\n Worker Tool Usage (Last 7 Days)\n"));
+    console.log(cyan('\n Worker Tool Usage (Last 7 Days)\n'));
 
     if (rows.length === 0) {
-      console.log(dim("No worker tool usage data found."));
-      console.log(dim("Data is collected when workers run with the Claude Code plugin."));
+      console.log(dim('No worker tool usage data found.'));
+      console.log(
+        dim('Data is collected when workers run with the Claude Code plugin.'),
+      );
       return;
     }
 
-    console.log(dim("Tool                    Calls   Sessions"));
-    console.log(dim("\u2500".repeat(45)));
+    console.log(dim('Tool                    Calls   Sessions'));
+    console.log(dim('\u2500'.repeat(45)));
 
     for (const row of rows) {
       const tool = String(row.tool).padEnd(22);
@@ -7074,7 +7439,7 @@ async function showWorkerCompliance() {
     }
 
     // Calculate compliance rate
-    const hivemindFinds = rows.find(r => r.tool === "hivemind_find");
+    const hivemindFinds = rows.find((r) => r.tool === 'hivemind_find');
     const completesSql = `SELECT COUNT(*) as count FROM swarm_events
       WHERE event_type = 'worker_completed'
         AND created_at > datetime('now', '-7 days')`;
@@ -7085,20 +7450,29 @@ async function showWorkerCompliance() {
 
     if (completes > 0) {
       const rate = Math.round((Math.min(finds, completes) / completes) * 100);
-      console.log(dim("\n\u2500".repeat(45)));
-      console.log(`\n${green("Hivemind compliance rate:")} ${rate}% (${finds} queries / ${completes} completions)`);
+      console.log(dim('\n\u2500'.repeat(45)));
+      console.log(
+        `\n${green('Hivemind compliance rate:')} ${rate}% (${finds} queries / ${completes} completions)`,
+      );
     }
-
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    if (msg.includes("no such table")) {
+    if (msg.includes('no such table')) {
       console.log(yellow(BANNER));
-      console.log(cyan("\n Worker Tool Usage\n"));
-      console.log(dim("No tracking data yet."));
-      console.log(dim("Compliance tracking starts when workers run with the Claude Code plugin hooks."));
-      console.log(dim("\nThe swarm_events table will be created on first tracked tool call."));
+      console.log(cyan('\n Worker Tool Usage\n'));
+      console.log(dim('No tracking data yet.'));
+      console.log(
+        dim(
+          'Compliance tracking starts when workers run with the Claude Code plugin hooks.',
+        ),
+      );
+      console.log(
+        dim(
+          '\nThe swarm_events table will be created on first tracked tool call.',
+        ),
+      );
     } else {
-      console.error("Error fetching compliance data:", msg);
+      console.error('Error fetching compliance data:', msg);
     }
   }
 }
@@ -7115,8 +7489,10 @@ async function claudeCoordinatorStart() {
   try {
     const input = await readHookInput<ClaudeHookInput>();
     const projectPath = resolveClaudeProjectPath(input);
-    writeClaudeHookOutput("SubagentStart:coordinator",
-      `Coordinator initialized for project: ${projectPath}`);
+    writeClaudeHookOutput(
+      'SubagentStart:coordinator',
+      `Coordinator initialized for project: ${projectPath}`,
+    );
   } catch (e) {
     // Non-fatal
   }
@@ -7130,8 +7506,10 @@ async function claudeWorkerStart() {
   try {
     const input = await readHookInput<ClaudeHookInput>();
     const projectPath = resolveClaudeProjectPath(input);
-    writeClaudeHookOutput("SubagentStart:worker",
-      `Worker initialized for project: ${projectPath}`);
+    writeClaudeHookOutput(
+      'SubagentStart:worker',
+      `Worker initialized for project: ${projectPath}`,
+    );
   } catch (e) {
     // Non-fatal
   }
@@ -7192,111 +7570,115 @@ async function claudePostTaskUpdate() {
 const command = process.argv[2];
 
 switch (command) {
-  case "setup": {
-    const reinstallFlag = process.argv.includes("--reinstall") || process.argv.includes("-r");
-    const yesFlag = process.argv.includes("--yes") || process.argv.includes("-y");
+  case 'setup': {
+    const reinstallFlag =
+      process.argv.includes('--reinstall') || process.argv.includes('-r');
+    const yesFlag =
+      process.argv.includes('--yes') || process.argv.includes('-y');
     await setup(reinstallFlag || yesFlag, yesFlag);
     break;
   }
-  case "doctor": {
-    const debugFlag = process.argv.includes("--debug") || process.argv.includes("-d");
+  case 'doctor': {
+    const debugFlag =
+      process.argv.includes('--debug') || process.argv.includes('-d');
     await doctor(debugFlag);
     break;
   }
-  case "init":
+  case 'init':
     await init();
     break;
-  case "config":
+  case 'config':
     config();
     break;
-  case "claude":
+  case 'claude':
     await claudeCommand();
     break;
-  case "serve":
+  case 'serve':
     await serve();
     break;
-  case "viz":
+  case 'viz':
     await viz();
     break;
-  case "update":
+  case 'update':
     await update();
     break;
-  case "tool": {
+  case 'tool': {
     const toolName = process.argv[3];
-    if (!toolName || toolName === "--list" || toolName === "-l") {
+    if (!toolName || toolName === '--list' || toolName === '-l') {
       await listTools();
     } else {
       // Look for --json flag
-      const jsonFlagIndex = process.argv.indexOf("--json");
+      const jsonFlagIndex = process.argv.indexOf('--json');
       const argsJson =
         jsonFlagIndex !== -1 ? process.argv[jsonFlagIndex + 1] : undefined;
       await executeTool(toolName, argsJson);
     }
     break;
   }
-  case "agents": {
-    const agentsNonInteractive = process.argv.includes("--yes") || process.argv.includes("-y");
+  case 'agents': {
+    const agentsNonInteractive =
+      process.argv.includes('--yes') || process.argv.includes('-y');
     await agents(agentsNonInteractive);
     break;
   }
-  case "migrate":
+  case 'migrate':
     await migrate();
     break;
-  case "db":
+  case 'db':
     await db();
     break;
-  case "cells":
+  case 'cells':
     await cells();
     break;
-  case "log":
-  case "logs":
+  case 'log':
+  case 'logs':
     await logs();
     break;
-  case "stats":
+  case 'stats':
     await stats();
     break;
-  case "o11y":
+  case 'o11y':
     await o11y();
     break;
-  case "history":
+  case 'history':
     await swarmHistory();
     break;
-  case "eval":
+  case 'eval':
     await evalCommand();
     break;
-  case "capture":
+  case 'capture':
     await capture();
     break;
-  case "memory":
+  case 'memory':
     await memory();
     break;
-  case "query":
+  case 'query':
     await query();
     break;
-  case "dashboard":
+  case 'dashboard':
     await dashboard();
     break;
-  case "replay":
+  case 'replay':
     await replay();
     break;
-  case "export":
+  case 'export':
     await exportEvents();
     break;
-  case "version":
-  case "--version":
-  case "-v":
+  case 'version':
+  case '--version':
+  case '-v':
     await version();
     break;
-  case "help":
-  case "--help":
-  case "-h":
+  case 'help':
+  case '--help':
+  case '-h':
     await help();
     break;
   case undefined:
     await setup();
     break;
   default:
-    console.error("Unknown command: " + command);
+    console.error('Unknown command: ' + command);
     help();
     process.exit(1);
 }

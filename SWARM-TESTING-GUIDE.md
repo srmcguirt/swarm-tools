@@ -15,7 +15,7 @@
 
 ```bash
 # 1. Install the plugin globally
-bun add -g opencode-swarm-plugin
+bun add -g opencode-swarm-plugin@npm:@srmcguirt/opencode-swarm-plugin@latest
 
 # 2. Verify CLI works
 swarm --version

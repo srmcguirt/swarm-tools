@@ -34,16 +34,16 @@
  * - OPENCODE_AGENT: Agent context
  * - SWARM_PROJECT_DIR: Project directory (critical for database path)
  */
-import type { Plugin, PluginInput, Hooks } from "@opencode-ai/plugin";
-import type { ToolPart } from "@opencode-ai/sdk";
-import { tool } from "@opencode-ai/plugin";
-import { spawn } from "child_process";
-import { appendFileSync, mkdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
-import { homedir, platform } from "node:os";
+import type { Plugin, PluginInput, Hooks } from '@opencode-ai/plugin';
+import type { ToolPart } from '@opencode-ai/sdk';
+import { tool } from '@opencode-ai/plugin';
+import { spawn } from 'child_process';
+import { appendFileSync, mkdirSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir, platform } from 'node:os';
 
 // Platform detection for Windows compatibility
-const isWindows = platform() === "win32";
+const isWindows = platform() === 'win32';
 
 // =============================================================================
 // Swarm Signature Detection (INLINED - do not import from opencode-swarm-plugin)
@@ -52,7 +52,12 @@ const isWindows = platform() === "win32";
 /**
  * Subtask lifecycle status derived from events
  */
-type SubtaskStatus = "created" | "spawned" | "in_progress" | "completed" | "closed";
+type SubtaskStatus =
+  | 'created'
+  | 'spawned'
+  | 'in_progress'
+  | 'completed'
+  | 'closed';
 
 /**
  * Subtask state projected from events
@@ -73,7 +78,7 @@ interface SubtaskState {
 interface EpicState {
   id: string;
   title: string;
-  status: "open" | "in_progress" | "closed";
+  status: 'open' | 'in_progress' | 'closed';
   createdAt: number;
 }
 
@@ -124,12 +129,12 @@ function parseSubtaskIds(output: string): string[] {
     const subtasks = parsed.subtasks || parsed.epic?.subtasks || [];
     return subtasks
       .map((s: unknown) => {
-        if (typeof s === "object" && s !== null && "id" in s) {
+        if (typeof s === 'object' && s !== null && 'id' in s) {
           return (s as { id: string }).id;
         }
         return undefined;
       })
-      .filter((id: unknown): id is string => typeof id === "string");
+      .filter((id: unknown): id is string => typeof id === 'string');
   } catch {
     return [];
   }
@@ -142,7 +147,14 @@ function projectSwarmState(events: ToolCallEvent[]): SwarmProjection {
   const state: SwarmProjection = {
     isSwarm: false,
     subtasks: new Map(),
-    counts: { total: 0, created: 0, spawned: 0, inProgress: 0, completed: 0, closed: 0 },
+    counts: {
+      total: 0,
+      created: 0,
+      spawned: 0,
+      inProgress: 0,
+      completed: 0,
+      closed: 0,
+    },
   };
 
   let hasEpic = false;
@@ -152,18 +164,26 @@ function projectSwarmState(events: ToolCallEvent[]): SwarmProjection {
     state.lastEventAt = event.timestamp;
 
     switch (event.tool) {
-      case "hive_create_epic": {
+      case 'hive_create_epic': {
         const epicId = parseEpicId(event.output);
-        const epicTitle = typeof event.input.epic_title === "string" ? event.input.epic_title : undefined;
+        const epicTitle =
+          typeof event.input.epic_title === 'string'
+            ? event.input.epic_title
+            : undefined;
 
         if (epicId) {
-          state.epic = { id: epicId, title: epicTitle || "Unknown Epic", status: "open", createdAt: event.timestamp };
+          state.epic = {
+            id: epicId,
+            title: epicTitle || 'Unknown Epic',
+            status: 'open',
+            createdAt: event.timestamp,
+          };
           hasEpic = true;
 
           const subtasks = event.input.subtasks;
           if (Array.isArray(subtasks)) {
             for (const subtask of subtasks) {
-              if (typeof subtask === "object" && subtask !== null) {
+              if (typeof subtask === 'object' && subtask !== null) {
                 state.counts.created++;
                 state.counts.total++;
               }
@@ -173,7 +193,12 @@ function projectSwarmState(events: ToolCallEvent[]): SwarmProjection {
           const subtaskIds = parseSubtaskIds(event.output);
           for (const id of subtaskIds) {
             if (!state.subtasks.has(id)) {
-              state.subtasks.set(id, { id, title: "Unknown", status: "created", files: [] });
+              state.subtasks.set(id, {
+                id,
+                title: 'Unknown',
+                status: 'created',
+                files: [],
+              });
               state.counts.total++;
               state.counts.created++;
             }
@@ -182,58 +207,93 @@ function projectSwarmState(events: ToolCallEvent[]): SwarmProjection {
         break;
       }
 
-      case "swarm_spawn_subtask": {
-        const beadId = typeof event.input.bead_id === "string" ? event.input.bead_id : undefined;
-        const title = typeof event.input.subtask_title === "string" ? event.input.subtask_title : "Unknown";
-        const files = Array.isArray(event.input.files) ? (event.input.files as string[]) : [];
+      case 'swarm_spawn_subtask': {
+        const beadId =
+          typeof event.input.bead_id === 'string'
+            ? event.input.bead_id
+            : undefined;
+        const title =
+          typeof event.input.subtask_title === 'string'
+            ? event.input.subtask_title
+            : 'Unknown';
+        const files = Array.isArray(event.input.files)
+          ? (event.input.files as string[])
+          : [];
 
         if (beadId) {
           hasSpawn = true;
           const existing = state.subtasks.get(beadId);
           if (existing) {
-            if (existing.status === "created") { state.counts.created--; state.counts.spawned++; }
-            existing.status = "spawned";
+            if (existing.status === 'created') {
+              state.counts.created--;
+              state.counts.spawned++;
+            }
+            existing.status = 'spawned';
             existing.title = title;
             existing.files = files;
             existing.spawnedAt = event.timestamp;
           } else {
-            state.subtasks.set(beadId, { id: beadId, title, status: "spawned", files, spawnedAt: event.timestamp });
+            state.subtasks.set(beadId, {
+              id: beadId,
+              title,
+              status: 'spawned',
+              files,
+              spawnedAt: event.timestamp,
+            });
             state.counts.total++;
             state.counts.spawned++;
           }
 
-          const epicId = typeof event.input.epic_id === "string" ? event.input.epic_id : undefined;
+          const epicId =
+            typeof event.input.epic_id === 'string'
+              ? event.input.epic_id
+              : undefined;
           if (epicId && !state.epic) {
-            state.epic = { id: epicId, title: "Unknown Epic", status: "in_progress", createdAt: event.timestamp };
+            state.epic = {
+              id: epicId,
+              title: 'Unknown Epic',
+              status: 'in_progress',
+              createdAt: event.timestamp,
+            };
           }
         }
         break;
       }
 
-      case "hive_start": {
-        const id = typeof event.input.id === "string" ? event.input.id : undefined;
+      case 'hive_start': {
+        const id =
+          typeof event.input.id === 'string' ? event.input.id : undefined;
         if (id) {
           const subtask = state.subtasks.get(id);
-          if (subtask && subtask.status !== "completed" && subtask.status !== "closed") {
-            if (subtask.status === "created") state.counts.created--;
-            else if (subtask.status === "spawned") state.counts.spawned--;
-            subtask.status = "in_progress";
+          if (
+            subtask &&
+            subtask.status !== 'completed' &&
+            subtask.status !== 'closed'
+          ) {
+            if (subtask.status === 'created') state.counts.created--;
+            else if (subtask.status === 'spawned') state.counts.spawned--;
+            subtask.status = 'in_progress';
             state.counts.inProgress++;
           }
-          if (state.epic && state.epic.id === id) state.epic.status = "in_progress";
+          if (state.epic && state.epic.id === id)
+            state.epic.status = 'in_progress';
         }
         break;
       }
 
-      case "swarm_complete": {
-        const beadId = typeof event.input.bead_id === "string" ? event.input.bead_id : undefined;
+      case 'swarm_complete': {
+        const beadId =
+          typeof event.input.bead_id === 'string'
+            ? event.input.bead_id
+            : undefined;
         if (beadId) {
           const subtask = state.subtasks.get(beadId);
-          if (subtask && subtask.status !== "closed") {
-            if (subtask.status === "created") state.counts.created--;
-            else if (subtask.status === "spawned") state.counts.spawned--;
-            else if (subtask.status === "in_progress") state.counts.inProgress--;
-            subtask.status = "completed";
+          if (subtask && subtask.status !== 'closed') {
+            if (subtask.status === 'created') state.counts.created--;
+            else if (subtask.status === 'spawned') state.counts.spawned--;
+            else if (subtask.status === 'in_progress')
+              state.counts.inProgress--;
+            subtask.status = 'completed';
             subtask.completedAt = event.timestamp;
             state.counts.completed++;
           }
@@ -241,29 +301,33 @@ function projectSwarmState(events: ToolCallEvent[]): SwarmProjection {
         break;
       }
 
-      case "hive_close": {
-        const id = typeof event.input.id === "string" ? event.input.id : undefined;
+      case 'hive_close': {
+        const id =
+          typeof event.input.id === 'string' ? event.input.id : undefined;
         if (id) {
           const subtask = state.subtasks.get(id);
           if (subtask) {
-            if (subtask.status === "created") state.counts.created--;
-            else if (subtask.status === "spawned") state.counts.spawned--;
-            else if (subtask.status === "in_progress") state.counts.inProgress--;
-            else if (subtask.status === "completed") state.counts.completed--;
-            subtask.status = "closed";
+            if (subtask.status === 'created') state.counts.created--;
+            else if (subtask.status === 'spawned') state.counts.spawned--;
+            else if (subtask.status === 'in_progress')
+              state.counts.inProgress--;
+            else if (subtask.status === 'completed') state.counts.completed--;
+            subtask.status = 'closed';
             state.counts.closed++;
           }
-          if (state.epic && state.epic.id === id) state.epic.status = "closed";
+          if (state.epic && state.epic.id === id) state.epic.status = 'closed';
         }
         break;
       }
 
-      case "swarmmail_init": {
+      case 'swarmmail_init': {
         try {
           const parsed = JSON.parse(event.output);
           if (parsed.agent_name) state.coordinatorName = parsed.agent_name;
           if (parsed.project_key) state.projectPath = parsed.project_key;
-        } catch { /* skip */ }
+        } catch {
+          /* skip */
+        }
         break;
       }
     }
@@ -278,8 +342,8 @@ function hasSwarmSignature(events: ToolCallEvent[]): boolean {
   let hasEpic = false;
   let hasSpawn = false;
   for (const event of events) {
-    if (event.tool === "hive_create_epic") hasEpic = true;
-    else if (event.tool === "swarm_spawn_subtask") hasSpawn = true;
+    if (event.tool === 'hive_create_epic') hasEpic = true;
+    else if (event.tool === 'swarm_spawn_subtask') hasSpawn = true;
     if (hasEpic && hasSpawn) return true;
   }
   return false;
@@ -288,19 +352,29 @@ function hasSwarmSignature(events: ToolCallEvent[]): boolean {
 /** Check if swarm is still active (has pending work) */
 function isSwarmActive(projection: SwarmProjection): boolean {
   if (!projection.isSwarm) return false;
-  return projection.counts.created > 0 || projection.counts.spawned > 0 ||
-         projection.counts.inProgress > 0 || projection.counts.completed > 0;
+  return (
+    projection.counts.created > 0 ||
+    projection.counts.spawned > 0 ||
+    projection.counts.inProgress > 0 ||
+    projection.counts.completed > 0
+  );
 }
 
 /** Get human-readable swarm status summary */
 function getSwarmSummary(projection: SwarmProjection): string {
-  if (!projection.isSwarm) return "No swarm detected";
+  if (!projection.isSwarm) return 'No swarm detected';
   const { counts, epic } = projection;
   const parts: string[] = [];
   if (epic) parts.push(`Epic: ${epic.id} - ${epic.title} [${epic.status}]`);
-  parts.push(`Subtasks: ${counts.total} total (${counts.spawned} spawned, ${counts.inProgress} in_progress, ${counts.completed} completed, ${counts.closed} closed)`);
-  parts.push(isSwarmActive(projection) ? "Status: ACTIVE - has pending work" : "Status: COMPLETE - all work closed");
-  return parts.join("\n");
+  parts.push(
+    `Subtasks: ${counts.total} total (${counts.spawned} spawned, ${counts.inProgress} in_progress, ${counts.completed} completed, ${counts.closed} closed)`,
+  );
+  parts.push(
+    isSwarmActive(projection)
+      ? 'Status: ACTIVE - has pending work'
+      : 'Status: COMPLETE - all work closed',
+  );
+  return parts.join('\n');
 }
 
 // =============================================================================
@@ -308,15 +382,15 @@ function getSwarmSummary(projection: SwarmProjection): string {
 // =============================================================================
 
 // On Windows, use .cmd extension to avoid shell escaping issues with JSON args
-const SWARM_CLI = isWindows ? "swarm.cmd" : "swarm";
-const OPENCODE_CLI = isWindows ? "opencode.cmd" : "opencode";
+const SWARM_CLI = isWindows ? 'swarm.cmd' : 'swarm';
+const OPENCODE_CLI = isWindows ? 'opencode.cmd' : 'opencode';
 
 // =============================================================================
 // File-based Logging (writes to ~/.config/swarm-tools/logs/)
 // =============================================================================
 
-const LOG_DIR = join(homedir(), ".config", "swarm-tools", "logs");
-const COMPACTION_LOG = join(LOG_DIR, "compaction.log");
+const LOG_DIR = join(homedir(), '.config', 'swarm-tools', 'logs');
+const COMPACTION_LOG = join(LOG_DIR, 'compaction.log');
 
 /**
  * Ensure log directory exists
@@ -329,13 +403,13 @@ function ensureLogDir(): void {
 
 /**
  * Log a compaction event to file (JSON lines format, compatible with `swarm log`)
- * 
+ *
  * @param level - Log level (info, debug, warn, error)
  * @param msg - Log message
  * @param data - Additional structured data
  */
 function logCompaction(
-  level: "info" | "debug" | "warn" | "error",
+  level: 'info' | 'debug' | 'warn' | 'error',
   msg: string,
   data?: Record<string, unknown>,
 ): void {
@@ -347,7 +421,7 @@ function logCompaction(
       msg,
       ...data,
     });
-    appendFileSync(COMPACTION_LOG, entry + "\n");
+    appendFileSync(COMPACTION_LOG, entry + '\n');
   } catch {
     // Silently fail - logging should never break the plugin
   }
@@ -357,20 +431,20 @@ function logCompaction(
  * Get date-stamped log file path
  * Format: ~/.config/swarm-tools/logs/{type}-YYYY-MM-DD.log
  */
-function getDateStampedLogPath(type: "tools" | "swarmmail" | "errors"): string {
-  const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+function getDateStampedLogPath(type: 'tools' | 'swarmmail' | 'errors'): string {
+  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
   return join(LOG_DIR, `${type}-${today}.log`);
 }
 
 /**
  * Rotate old log files (delete files older than 7 days)
- * 
+ *
  * Runs silently - never breaks the plugin if rotation fails.
  */
 function rotateLogFiles(): void {
   try {
     ensureLogDir();
-    const { readdirSync, unlinkSync, statSync } = require("node:fs");
+    const { readdirSync, unlinkSync, statSync } = require('node:fs');
     const files = readdirSync(LOG_DIR);
     const now = Date.now();
     const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
@@ -396,7 +470,7 @@ function rotateLogFiles(): void {
 
 /**
  * Log a tool invocation to date-stamped file
- * 
+ *
  * @param toolName - Tool name (e.g., "hive_create", "swarm_status")
  * @param args - Tool arguments
  * @param result - Tool result (optional, for successful calls)
@@ -412,10 +486,10 @@ function logTool(
     ensureLogDir();
     rotateLogFiles(); // Rotate on every log call (cheap operation)
 
-    const logPath = getDateStampedLogPath("tools");
+    const logPath = getDateStampedLogPath('tools');
     const entry = JSON.stringify({
       time: new Date().toISOString(),
-      level: error ? "error" : "info",
+      level: error ? 'error' : 'info',
       msg: `tool_call: ${toolName}`,
       tool: toolName,
       args,
@@ -423,7 +497,7 @@ function logTool(
       ...(error && { error }),
     });
 
-    appendFileSync(logPath, entry + "\n");
+    appendFileSync(logPath, entry + '\n');
   } catch {
     // Silently fail - logging should never break the plugin
   }
@@ -431,27 +505,24 @@ function logTool(
 
 /**
  * Log a Swarm Mail event to date-stamped file
- * 
+ *
  * @param event - Event type (e.g., "message_sent", "inbox_fetched")
  * @param data - Event data
  */
-function logSwarmMail(
-  event: string,
-  data: Record<string, unknown>,
-): void {
+function logSwarmMail(event: string, data: Record<string, unknown>): void {
   try {
     ensureLogDir();
     rotateLogFiles();
 
-    const logPath = getDateStampedLogPath("swarmmail");
+    const logPath = getDateStampedLogPath('swarmmail');
     const entry = JSON.stringify({
       time: new Date().toISOString(),
-      level: "info",
+      level: 'info',
       msg: event,
       ...data,
     });
 
-    appendFileSync(logPath, entry + "\n");
+    appendFileSync(logPath, entry + '\n');
   } catch {
     // Silently fail
   }
@@ -459,27 +530,24 @@ function logSwarmMail(
 
 /**
  * Log an error to date-stamped file
- * 
+ *
  * @param error - Error message
  * @param data - Additional error context
  */
-function logError(
-  error: string,
-  data?: Record<string, unknown>,
-): void {
+function logError(error: string, data?: Record<string, unknown>): void {
   try {
     ensureLogDir();
     rotateLogFiles();
 
-    const logPath = getDateStampedLogPath("errors");
+    const logPath = getDateStampedLogPath('errors');
     const entry = JSON.stringify({
       time: new Date().toISOString(),
-      level: "error",
+      level: 'error',
       msg: error,
       ...data,
     });
 
-    appendFileSync(logPath, entry + "\n");
+    appendFileSync(logPath, entry + '\n');
   } catch {
     // Silently fail
   }
@@ -487,13 +555,13 @@ function logError(
 
 /**
  * Capture compaction event for evals (INLINED - do not import from opencode-swarm-plugin)
- * 
+ *
  * Writes COMPACTION events directly to session JSONL file.
  * This is inlined to avoid import issues - plugin wrapper must be 100% self-contained.
- * 
+ *
  * Matches the structure of captureCompactionEvent from eval-capture.ts but writes
  * ONLY to JSONL (not libSQL) to avoid swarm-mail dependency.
- * 
+ *
  * @param sessionID - Session ID
  * @param epicID - Epic ID (or "unknown" if not detected)
  * @param compactionType - Event type (detection_complete, prompt_generated, context_injected, resumption_started, tool_call_tracked)
@@ -502,7 +570,12 @@ function logError(
 async function captureCompaction(
   sessionID: string,
   epicID: string,
-  compactionType: "detection_complete" | "prompt_generated" | "context_injected" | "resumption_started" | "tool_call_tracked",
+  compactionType:
+    | 'detection_complete'
+    | 'prompt_generated'
+    | 'context_injected'
+    | 'resumption_started'
+    | 'tool_call_tracked',
   payload: any,
 ): Promise<void> {
   try {
@@ -511,15 +584,16 @@ async function captureCompaction(
       session_id: sessionID,
       epic_id: epicID,
       timestamp: new Date().toISOString(),
-      event_type: "COMPACTION",
+      event_type: 'COMPACTION',
       compaction_type: compactionType,
       payload: payload,
     };
 
     // Session directory: ~/.config/swarm-tools/sessions/
-    const sessionDir = process.env.SWARM_SESSIONS_DIR || 
-      join(homedir(), ".config", "swarm-tools", "sessions");
-    
+    const sessionDir =
+      process.env.SWARM_SESSIONS_DIR ||
+      join(homedir(), '.config', 'swarm-tools', 'sessions');
+
     // Ensure directory exists
     if (!existsSync(sessionDir)) {
       mkdirSync(sessionDir, { recursive: true });
@@ -528,9 +602,9 @@ async function captureCompaction(
     // Write to JSONL (append mode)
     const sessionPath = join(sessionDir, `${sessionID}.jsonl`);
     const line = `${JSON.stringify(event)}\n`;
-    appendFileSync(sessionPath, line, "utf-8");
+    appendFileSync(sessionPath, line, 'utf-8');
 
-    logCompaction("debug", "compaction_event_captured", {
+    logCompaction('debug', 'compaction_event_captured', {
       session_id: sessionID,
       epic_id: epicID,
       compaction_type: compactionType,
@@ -538,7 +612,7 @@ async function captureCompaction(
     });
   } catch (err) {
     // Non-fatal - capture failures shouldn't break compaction
-    logCompaction("warn", "compaction_capture_failed", {
+    logCompaction('warn', 'compaction_capture_failed', {
       session_id: sessionID,
       epic_id: epicID,
       compaction_type: compactionType,
@@ -564,7 +638,7 @@ let sdkClient: any = null;
  *
  * Spawns `swarm tool <name> --json '<args>'` and returns the result.
  * Passes session context via environment variables.
- * 
+ *
  * IMPORTANT: Runs in projectDirectory (set by OpenCode) not process.cwd()
  */
 async function execTool(
@@ -575,12 +649,12 @@ async function execTool(
   return new Promise((resolve, reject) => {
     const hasArgs = Object.keys(args).length > 0;
     const cliArgs = hasArgs
-      ? ["tool", name, "--json", JSON.stringify(args)]
-      : ["tool", name];
+      ? ['tool', name, '--json', JSON.stringify(args)]
+      : ['tool', name];
 
     const proc = spawn(SWARM_CLI, cliArgs, {
       cwd: projectDirectory, // Run in project directory, not plugin directory
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,
         OPENCODE_SESSION_ID: ctx.sessionID,
@@ -590,47 +664,54 @@ async function execTool(
       },
     });
 
-    let stdout = "";
-    let stderr = "";
+    let stdout = '';
+    let stderr = '';
 
-    proc.stdout.on("data", (data) => {
+    proc.stdout.on('data', (data) => {
       stdout += data;
     });
-    proc.stderr.on("data", (data) => {
+    proc.stderr.on('data', (data) => {
       stderr += data;
     });
 
-    proc.on("close", (code) => {
+    proc.on('close', (code) => {
       if (code === 0) {
         // Success - return the JSON output
         try {
           const result = JSON.parse(stdout);
           if (result.success && result.data !== undefined) {
             // Log successful tool call
-            logTool(name, args, typeof result.data === "string" ? result.data : JSON.stringify(result.data));
-            
+            logTool(
+              name,
+              args,
+              typeof result.data === 'string'
+                ? result.data
+                : JSON.stringify(result.data),
+            );
+
             // Log Swarm Mail events separately
-            if (name.startsWith("swarmmail_")) {
+            if (name.startsWith('swarmmail_')) {
               logSwarmMail(`tool_${name}`, { args, result: result.data });
             }
-            
+
             // Unwrap the data for cleaner tool output
             resolve(
-              typeof result.data === "string"
+              typeof result.data === 'string'
                 ? result.data
                 : JSON.stringify(result.data, null, 2),
             );
           } else if (!result.success && result.error) {
             // Tool returned an error in JSON format
             // Handle both string errors and object errors with .message
-            const errorMsg = typeof result.error === "string" 
-              ? result.error 
-              : (result.error.message || "Tool execution failed");
-            
+            const errorMsg =
+              typeof result.error === 'string'
+                ? result.error
+                : result.error.message || 'Tool execution failed';
+
             // Log failed tool call
             logTool(name, args, undefined, errorMsg);
             logError(`Tool ${name} failed`, { args, error: errorMsg });
-            
+
             reject(new Error(errorMsg));
           } else {
             // Log successful (non-standard response)
@@ -656,40 +737,49 @@ async function execTool(
           const result = JSON.parse(stdout);
           if (!result.success && result.error) {
             // Handle both string errors and object errors with .message
-            const errorMsg = typeof result.error === "string"
-              ? result.error
-              : (result.error.message || `Tool failed with code ${code}`);
-            
+            const errorMsg =
+              typeof result.error === 'string'
+                ? result.error
+                : result.error.message || `Tool failed with code ${code}`;
+
             logTool(name, args, undefined, errorMsg);
-            logError(`Tool ${name} failed with code ${code}`, { args, error: errorMsg });
-            
+            logError(`Tool ${name} failed with code ${code}`, {
+              args,
+              error: errorMsg,
+            });
+
             reject(new Error(errorMsg));
           } else {
-            const errorMsg = stderr || stdout || `Tool failed with code ${code}`;
+            const errorMsg =
+              stderr || stdout || `Tool failed with code ${code}`;
             logTool(name, args, undefined, errorMsg);
-            logError(`Tool ${name} failed with code ${code}`, { args, stderr, stdout });
-            
-            reject(
-              new Error(errorMsg),
-            );
+            logError(`Tool ${name} failed with code ${code}`, {
+              args,
+              stderr,
+              stdout,
+            });
+
+            reject(new Error(errorMsg));
           }
         } catch {
           const errorMsg = stderr || stdout || `Tool failed with code ${code}`;
           logTool(name, args, undefined, errorMsg);
-          logError(`Tool ${name} failed with code ${code}`, { args, stderr, stdout });
-          
-          reject(
-            new Error(errorMsg),
-          );
+          logError(`Tool ${name} failed with code ${code}`, {
+            args,
+            stderr,
+            stdout,
+          });
+
+          reject(new Error(errorMsg));
         }
       }
     });
 
-    proc.on("error", (err) => {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+    proc.on('error', (err) => {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         reject(
           new Error(
-            `swarm CLI not found. Install with: npm install -g opencode-swarm-plugin`,
+            `swarm CLI not found. Install with: bun add -g opencode-swarm-plugin@npm:@srmcguirt/opencode-swarm-plugin@latest`,
           ),
         );
       } else {
@@ -704,36 +794,36 @@ async function execTool(
 // =============================================================================
 
 const hive_create = tool({
-  description: "Create a new bead with type-safe validation",
+  description: 'Create a new bead with type-safe validation',
   args: {
-    title: tool.schema.string().describe("Bead title"),
+    title: tool.schema.string().describe('Bead title'),
     type: tool.schema
-      .enum(["bug", "feature", "task", "epic", "chore"])
+      .enum(['bug', 'feature', 'task', 'epic', 'chore'])
       .optional()
-      .describe("Issue type (default: task)"),
+      .describe('Issue type (default: task)'),
     priority: tool.schema
       .number()
       .min(0)
       .max(3)
       .optional()
-      .describe("Priority 0-3 (default: 2)"),
-    description: tool.schema.string().optional().describe("Bead description"),
+      .describe('Priority 0-3 (default: 2)'),
+    description: tool.schema.string().optional().describe('Bead description'),
     parent_id: tool.schema
       .string()
       .optional()
-      .describe("Parent bead ID for epic children"),
+      .describe('Parent bead ID for epic children'),
   },
-  execute: (args, ctx) => execTool("hive_create", args, ctx),
+  execute: (args, ctx) => execTool('hive_create', args, ctx),
 });
 
 const hive_create_epic = tool({
-  description: "Create epic with subtasks in one atomic operation",
+  description: 'Create epic with subtasks in one atomic operation',
   args: {
-    epic_title: tool.schema.string().describe("Epic title"),
+    epic_title: tool.schema.string().describe('Epic title'),
     epic_description: tool.schema
       .string()
       .optional()
-      .describe("Epic description"),
+      .describe('Epic description'),
     subtasks: tool.schema
       .array(
         tool.schema.object({
@@ -742,82 +832,82 @@ const hive_create_epic = tool({
           files: tool.schema.array(tool.schema.string()).optional(),
         }),
       )
-      .describe("Subtasks to create under the epic"),
+      .describe('Subtasks to create under the epic'),
   },
-  execute: (args, ctx) => execTool("hive_create_epic", args, ctx),
+  execute: (args, ctx) => execTool('hive_create_epic', args, ctx),
 });
 
 const hive_query = tool({
-  description: "Query beads with filters (replaces bd list, bd ready, bd wip)",
+  description: 'Query beads with filters (replaces bd list, bd ready, bd wip)',
   args: {
     status: tool.schema
-      .enum(["open", "in_progress", "blocked", "closed"])
+      .enum(['open', 'in_progress', 'blocked', 'closed'])
       .optional()
-      .describe("Filter by status"),
+      .describe('Filter by status'),
     type: tool.schema
-      .enum(["bug", "feature", "task", "epic", "chore"])
+      .enum(['bug', 'feature', 'task', 'epic', 'chore'])
       .optional()
-      .describe("Filter by type"),
+      .describe('Filter by type'),
     ready: tool.schema
       .boolean()
       .optional()
-      .describe("Only show unblocked beads"),
+      .describe('Only show unblocked beads'),
     limit: tool.schema
       .number()
       .optional()
-      .describe("Max results (default: 20)"),
+      .describe('Max results (default: 20)'),
   },
-  execute: (args, ctx) => execTool("hive_query", args, ctx),
+  execute: (args, ctx) => execTool('hive_query', args, ctx),
 });
 
 const hive_update = tool({
-  description: "Update bead status/description",
+  description: 'Update bead status/description',
   args: {
-    id: tool.schema.string().describe("Cell ID"),
+    id: tool.schema.string().describe('Cell ID'),
     status: tool.schema
-      .enum(["open", "in_progress", "blocked", "closed"])
+      .enum(['open', 'in_progress', 'blocked', 'closed'])
       .optional()
-      .describe("New status"),
-    description: tool.schema.string().optional().describe("New description"),
+      .describe('New status'),
+    description: tool.schema.string().optional().describe('New description'),
     priority: tool.schema
       .number()
       .min(0)
       .max(3)
       .optional()
-      .describe("New priority"),
+      .describe('New priority'),
   },
-  execute: (args, ctx) => execTool("hive_update", args, ctx),
+  execute: (args, ctx) => execTool('hive_update', args, ctx),
 });
 
 const hive_close = tool({
-  description: "Close a bead with reason",
+  description: 'Close a bead with reason',
   args: {
-    id: tool.schema.string().describe("Cell ID"),
-    reason: tool.schema.string().describe("Completion reason"),
+    id: tool.schema.string().describe('Cell ID'),
+    reason: tool.schema.string().describe('Completion reason'),
   },
-  execute: (args, ctx) => execTool("hive_close", args, ctx),
+  execute: (args, ctx) => execTool('hive_close', args, ctx),
 });
 
 const hive_start = tool({
-  description: "Mark a bead as in-progress",
+  description: 'Mark a bead as in-progress',
   args: {
-    id: tool.schema.string().describe("Cell ID"),
+    id: tool.schema.string().describe('Cell ID'),
   },
-  execute: (args, ctx) => execTool("hive_start", args, ctx),
+  execute: (args, ctx) => execTool('hive_start', args, ctx),
 });
 
 const hive_ready = tool({
-  description: "Get the next ready bead (unblocked, highest priority)",
+  description: 'Get the next ready bead (unblocked, highest priority)',
   args: {},
-  execute: (args, ctx) => execTool("hive_ready", args, ctx),
+  execute: (args, ctx) => execTool('hive_ready', args, ctx),
 });
 
 const hive_sync = tool({
-  description: "Sync beads to git and push (MANDATORY at session end)",
+  description: 'Sync beads to git and push (MANDATORY at session end)',
   args: {
-    auto_pull: tool.schema.boolean().optional().describe("Pull before sync"),
+    auto_pull: tool.schema.boolean().optional().describe('Pull before sync'),
   },
-  execute: (args, ctx) => execTool("hive_sync", args, ctx),
+  execute: (args, ctx) => execTool('hive_sync', args, ctx),
 });
 
 const hive_cells = tool({
@@ -839,22 +929,37 @@ PREFER THIS OVER hive_query when you need to:
 - Find cells matching criteria
 - Look up a cell by partial ID`,
   args: {
-    id: tool.schema.string().optional().describe("Partial or full cell ID to look up"),
-    status: tool.schema.enum(["open", "in_progress", "blocked", "closed"]).optional().describe("Filter by status"),
-    type: tool.schema.enum(["task", "bug", "feature", "epic", "chore"]).optional().describe("Filter by type"),
-    ready: tool.schema.boolean().optional().describe("If true, return only the next unblocked cell"),
-    limit: tool.schema.number().optional().describe("Max cells to return (default 20)"),
+    id: tool.schema
+      .string()
+      .optional()
+      .describe('Partial or full cell ID to look up'),
+    status: tool.schema
+      .enum(['open', 'in_progress', 'blocked', 'closed'])
+      .optional()
+      .describe('Filter by status'),
+    type: tool.schema
+      .enum(['task', 'bug', 'feature', 'epic', 'chore'])
+      .optional()
+      .describe('Filter by type'),
+    ready: tool.schema
+      .boolean()
+      .optional()
+      .describe('If true, return only the next unblocked cell'),
+    limit: tool.schema
+      .number()
+      .optional()
+      .describe('Max cells to return (default 20)'),
   },
-  execute: (args, ctx) => execTool("hive_cells", args, ctx),
+  execute: (args, ctx) => execTool('hive_cells', args, ctx),
 });
 
 const beads_link_thread = tool({
-  description: "Add metadata linking bead to Agent Mail thread",
+  description: 'Add metadata linking bead to Agent Mail thread',
   args: {
-    bead_id: tool.schema.string().describe("Cell ID"),
-    thread_id: tool.schema.string().describe("Agent Mail thread ID"),
+    bead_id: tool.schema.string().describe('Cell ID'),
+    thread_id: tool.schema.string().describe('Agent Mail thread ID'),
   },
-  execute: (args, ctx) => execTool("beads_link_thread", args, ctx),
+  execute: (args, ctx) => execTool('beads_link_thread', args, ctx),
 });
 
 // =============================================================================
@@ -872,9 +977,9 @@ Credit: Chainlink session handoff pattern from https://github.com/dollspace-gay/
     active_cell_id: tool.schema
       .string()
       .optional()
-      .describe("ID of cell being worked on"),
+      .describe('ID of cell being worked on'),
   },
-  execute: (args, ctx) => execTool("hive_session_start", args, ctx),
+  execute: (args, ctx) => execTool('hive_session_start', args, ctx),
 });
 
 const hive_session_end = tool({
@@ -888,9 +993,11 @@ Credit: Chainlink session handoff pattern from https://github.com/dollspace-gay/
     handoff_notes: tool.schema
       .string()
       .optional()
-      .describe("Notes for next session (e.g., 'Completed X. Next: do Y. Watch out for Z.')"),
+      .describe(
+        "Notes for next session (e.g., 'Completed X. Next: do Y. Watch out for Z.')",
+      ),
   },
-  execute: (args, ctx) => execTool("hive_session_end", args, ctx),
+  execute: (args, ctx) => execTool('hive_session_end', args, ctx),
 });
 
 // =============================================================================
@@ -898,120 +1005,122 @@ Credit: Chainlink session handoff pattern from https://github.com/dollspace-gay/
 // =============================================================================
 
 const swarmmail_init = tool({
-  description: "Initialize Swarm Mail session (REQUIRED FIRST)",
+  description: 'Initialize Swarm Mail session (REQUIRED FIRST)',
   args: {
-    project_path: tool.schema.string().describe("Absolute path to the project"),
-    agent_name: tool.schema.string().optional().describe("Custom agent name"),
+    project_path: tool.schema.string().describe('Absolute path to the project'),
+    agent_name: tool.schema.string().optional().describe('Custom agent name'),
     task_description: tool.schema
       .string()
       .optional()
-      .describe("Task description"),
+      .describe('Task description'),
   },
-  execute: (args, ctx) => execTool("swarmmail_init", args, ctx),
+  execute: (args, ctx) => execTool('swarmmail_init', args, ctx),
 });
 
 const swarmmail_send = tool({
-  description: "Send message to other agents via Swarm Mail",
+  description: 'Send message to other agents via Swarm Mail',
   args: {
     to: tool.schema
       .array(tool.schema.string())
-      .describe("Recipient agent names"),
-    subject: tool.schema.string().describe("Message subject"),
-    body: tool.schema.string().describe("Message body"),
+      .describe('Recipient agent names'),
+    subject: tool.schema.string().describe('Message subject'),
+    body: tool.schema.string().describe('Message body'),
     thread_id: tool.schema
       .string()
       .optional()
-      .describe("Thread ID for grouping"),
+      .describe('Thread ID for grouping'),
     importance: tool.schema
-      .enum(["low", "normal", "high", "urgent"])
+      .enum(['low', 'normal', 'high', 'urgent'])
       .optional()
-      .describe("Message importance"),
+      .describe('Message importance'),
     ack_required: tool.schema
       .boolean()
       .optional()
-      .describe("Require acknowledgment"),
+      .describe('Require acknowledgment'),
   },
-  execute: (args, ctx) => execTool("swarmmail_send", args, ctx),
+  execute: (args, ctx) => execTool('swarmmail_send', args, ctx),
 });
 
 const swarmmail_inbox = tool({
-  description: "Fetch inbox (CONTEXT-SAFE: bodies excluded, max 5 messages)",
+  description: 'Fetch inbox (CONTEXT-SAFE: bodies excluded, max 5 messages)',
   args: {
     limit: tool.schema
       .number()
       .max(5)
       .optional()
-      .describe("Max messages (max 5)"),
+      .describe('Max messages (max 5)'),
     urgent_only: tool.schema
       .boolean()
       .optional()
-      .describe("Only urgent messages"),
+      .describe('Only urgent messages'),
   },
-  execute: (args, ctx) => execTool("swarmmail_inbox", args, ctx),
+  execute: (args, ctx) => execTool('swarmmail_inbox', args, ctx),
 });
 
 const swarmmail_read_message = tool({
-  description: "Fetch ONE message body by ID",
+  description: 'Fetch ONE message body by ID',
   args: {
-    message_id: tool.schema.number().describe("Message ID"),
+    message_id: tool.schema.number().describe('Message ID'),
   },
-  execute: (args, ctx) => execTool("swarmmail_read_message", args, ctx),
+  execute: (args, ctx) => execTool('swarmmail_read_message', args, ctx),
 });
 
 const swarmmail_reserve = tool({
-  description: "Reserve file paths for exclusive editing",
+  description: 'Reserve file paths for exclusive editing',
   args: {
     paths: tool.schema
       .array(tool.schema.string())
-      .describe("File paths/patterns"),
-    ttl_seconds: tool.schema.number().optional().describe("Reservation TTL"),
-    exclusive: tool.schema.boolean().optional().describe("Exclusive lock"),
-    reason: tool.schema.string().optional().describe("Reservation reason"),
+      .describe('File paths/patterns'),
+    ttl_seconds: tool.schema.number().optional().describe('Reservation TTL'),
+    exclusive: tool.schema.boolean().optional().describe('Exclusive lock'),
+    reason: tool.schema.string().optional().describe('Reservation reason'),
   },
-  execute: (args, ctx) => execTool("swarmmail_reserve", args, ctx),
+  execute: (args, ctx) => execTool('swarmmail_reserve', args, ctx),
 });
 
 const swarmmail_release = tool({
-  description: "Release file reservations",
+  description: 'Release file reservations',
   args: {
     paths: tool.schema
       .array(tool.schema.string())
       .optional()
-      .describe("Paths to release"),
+      .describe('Paths to release'),
     reservation_ids: tool.schema
       .array(tool.schema.number())
       .optional()
-      .describe("Reservation IDs"),
+      .describe('Reservation IDs'),
   },
-  execute: (args, ctx) => execTool("swarmmail_release", args, ctx),
+  execute: (args, ctx) => execTool('swarmmail_release', args, ctx),
 });
 
 const swarmmail_release_all = tool({
-  description: "Release all file reservations in the project (coordinator override)",
+  description:
+    'Release all file reservations in the project (coordinator override)',
   args: {},
-  execute: (args, ctx) => execTool("swarmmail_release_all", args, ctx),
+  execute: (args, ctx) => execTool('swarmmail_release_all', args, ctx),
 });
 
 const swarmmail_release_agent = tool({
-  description: "Release all file reservations for a specific agent (coordinator override)",
+  description:
+    'Release all file reservations for a specific agent (coordinator override)',
   args: {
-    agent_name: tool.schema.string().describe("Target agent name"),
+    agent_name: tool.schema.string().describe('Target agent name'),
   },
-  execute: (args, ctx) => execTool("swarmmail_release_agent", args, ctx),
+  execute: (args, ctx) => execTool('swarmmail_release_agent', args, ctx),
 });
 
 const swarmmail_ack = tool({
-  description: "Acknowledge a message",
+  description: 'Acknowledge a message',
   args: {
-    message_id: tool.schema.number().describe("Message ID"),
+    message_id: tool.schema.number().describe('Message ID'),
   },
-  execute: (args, ctx) => execTool("swarmmail_ack", args, ctx),
+  execute: (args, ctx) => execTool('swarmmail_ack', args, ctx),
 });
 
 const swarmmail_health = tool({
-  description: "Check Swarm Mail database health",
+  description: 'Check Swarm Mail database health',
   args: {},
-  execute: (args, ctx) => execTool("swarmmail_health", args, ctx),
+  execute: (args, ctx) => execTool('swarmmail_health', args, ctx),
 });
 
 // =============================================================================
@@ -1019,52 +1128,52 @@ const swarmmail_health = tool({
 // =============================================================================
 
 const structured_extract_json = tool({
-  description: "Extract JSON from markdown/text response",
+  description: 'Extract JSON from markdown/text response',
   args: {
-    text: tool.schema.string().describe("Text containing JSON"),
+    text: tool.schema.string().describe('Text containing JSON'),
   },
-  execute: (args, ctx) => execTool("structured_extract_json", args, ctx),
+  execute: (args, ctx) => execTool('structured_extract_json', args, ctx),
 });
 
 const structured_validate = tool({
-  description: "Validate agent response against a schema",
+  description: 'Validate agent response against a schema',
   args: {
-    response: tool.schema.string().describe("Agent response to validate"),
+    response: tool.schema.string().describe('Agent response to validate'),
     schema_name: tool.schema
-      .enum(["evaluation", "task_decomposition", "cell_tree"])
-      .describe("Schema to validate against"),
+      .enum(['evaluation', 'task_decomposition', 'cell_tree'])
+      .describe('Schema to validate against'),
     max_retries: tool.schema
       .number()
       .min(1)
       .max(5)
       .optional()
-      .describe("Max retries"),
+      .describe('Max retries'),
   },
-  execute: (args, ctx) => execTool("structured_validate", args, ctx),
+  execute: (args, ctx) => execTool('structured_validate', args, ctx),
 });
 
 const structured_parse_evaluation = tool({
-  description: "Parse and validate evaluation response",
+  description: 'Parse and validate evaluation response',
   args: {
-    response: tool.schema.string().describe("Agent response"),
+    response: tool.schema.string().describe('Agent response'),
   },
-  execute: (args, ctx) => execTool("structured_parse_evaluation", args, ctx),
+  execute: (args, ctx) => execTool('structured_parse_evaluation', args, ctx),
 });
 
 const structured_parse_decomposition = tool({
-  description: "Parse and validate task decomposition response",
+  description: 'Parse and validate task decomposition response',
   args: {
-    response: tool.schema.string().describe("Agent response"),
+    response: tool.schema.string().describe('Agent response'),
   },
-  execute: (args, ctx) => execTool("structured_parse_decomposition", args, ctx),
+  execute: (args, ctx) => execTool('structured_parse_decomposition', args, ctx),
 });
 
 const structured_parse_cell_tree = tool({
-  description: "Parse and validate bead tree response",
+  description: 'Parse and validate bead tree response',
   args: {
-    response: tool.schema.string().describe("Agent response"),
+    response: tool.schema.string().describe('Agent response'),
   },
-  execute: (args, ctx) => execTool("structured_parse_cell_tree", args, ctx),
+  execute: (args, ctx) => execTool('structured_parse_cell_tree', args, ctx),
 });
 
 // =============================================================================
@@ -1072,262 +1181,265 @@ const structured_parse_cell_tree = tool({
 // =============================================================================
 
 const swarm_init = tool({
-  description: "Initialize swarm session and check tool availability",
+  description: 'Initialize swarm session and check tool availability',
   args: {
-    project_path: tool.schema.string().optional().describe("Project path"),
+    project_path: tool.schema.string().optional().describe('Project path'),
     isolation: tool.schema
-      .enum(["worktree", "reservation"])
+      .enum(['worktree', 'reservation'])
       .optional()
       .describe(
         "Isolation mode: 'worktree' for git worktree isolation, 'reservation' for file reservations (default)",
       ),
   },
-  execute: (args, ctx) => execTool("swarm_init", args, ctx),
+  execute: (args, ctx) => execTool('swarm_init', args, ctx),
 });
 
 const swarm_select_strategy = tool({
-  description: "Analyze task and recommend decomposition strategy",
+  description: 'Analyze task and recommend decomposition strategy',
   args: {
-    task: tool.schema.string().min(1).describe("Task to analyze"),
+    task: tool.schema.string().min(1).describe('Task to analyze'),
     codebase_context: tool.schema
       .string()
       .optional()
-      .describe("Codebase context"),
+      .describe('Codebase context'),
   },
-  execute: (args, ctx) => execTool("swarm_select_strategy", args, ctx),
+  execute: (args, ctx) => execTool('swarm_select_strategy', args, ctx),
 });
 
 const swarm_plan_prompt = tool({
-  description: "Generate strategy-specific decomposition prompt",
+  description: 'Generate strategy-specific decomposition prompt',
   args: {
-    task: tool.schema.string().min(1).describe("Task to decompose"),
+    task: tool.schema.string().min(1).describe('Task to decompose'),
     strategy: tool.schema
-      .enum(["file-based", "feature-based", "risk-based", "auto"])
+      .enum(['file-based', 'feature-based', 'risk-based', 'auto'])
       .optional()
-      .describe("Decomposition strategy"),
+      .describe('Decomposition strategy'),
     max_subtasks: tool.schema
       .number()
       .int()
       .min(2)
       .max(10)
       .optional()
-      .describe("Max subtasks"),
-    context: tool.schema.string().optional().describe("Additional context"),
+      .describe('Max subtasks'),
+    context: tool.schema.string().optional().describe('Additional context'),
     query_cass: tool.schema
       .boolean()
       .optional()
-      .describe("Query CASS for similar tasks"),
+      .describe('Query CASS for similar tasks'),
     cass_limit: tool.schema
       .number()
       .int()
       .min(1)
       .max(10)
       .optional()
-      .describe("CASS limit"),
+      .describe('CASS limit'),
   },
-  execute: (args, ctx) => execTool("swarm_plan_prompt", args, ctx),
+  execute: (args, ctx) => execTool('swarm_plan_prompt', args, ctx),
 });
 
 const swarm_decompose = tool({
-  description: "Generate decomposition prompt for breaking task into subtasks",
+  description: 'Generate decomposition prompt for breaking task into subtasks',
   args: {
-    task: tool.schema.string().min(1).describe("Task to decompose"),
+    task: tool.schema.string().min(1).describe('Task to decompose'),
     max_subtasks: tool.schema
       .number()
       .int()
       .min(2)
       .max(10)
       .optional()
-      .describe("Max subtasks"),
-    context: tool.schema.string().optional().describe("Additional context"),
-    query_cass: tool.schema.boolean().optional().describe("Query CASS"),
+      .describe('Max subtasks'),
+    context: tool.schema.string().optional().describe('Additional context'),
+    query_cass: tool.schema.boolean().optional().describe('Query CASS'),
     cass_limit: tool.schema
       .number()
       .int()
       .min(1)
       .max(10)
       .optional()
-      .describe("CASS limit"),
+      .describe('CASS limit'),
   },
-  execute: (args, ctx) => execTool("swarm_decompose", args, ctx),
+  execute: (args, ctx) => execTool('swarm_decompose', args, ctx),
 });
 
 const swarm_validate_decomposition = tool({
-  description: "Validate a decomposition response against CellTreeSchema",
+  description: 'Validate a decomposition response against CellTreeSchema',
   args: {
-    response: tool.schema.string().describe("Decomposition response"),
+    response: tool.schema.string().describe('Decomposition response'),
   },
-  execute: (args, ctx) => execTool("swarm_validate_decomposition", args, ctx),
+  execute: (args, ctx) => execTool('swarm_validate_decomposition', args, ctx),
 });
 
 const swarm_status = tool({
-  description: "Get status of a swarm by epic ID",
+  description: 'Get status of a swarm by epic ID',
   args: {
-    epic_id: tool.schema.string().describe("Epic bead ID"),
-    project_key: tool.schema.string().describe("Project key"),
+    epic_id: tool.schema.string().describe('Epic bead ID'),
+    project_key: tool.schema.string().describe('Project key'),
   },
-  execute: (args, ctx) => execTool("swarm_status", args, ctx),
+  execute: (args, ctx) => execTool('swarm_status', args, ctx),
 });
 
 const swarm_progress = tool({
-  description: "Report progress on a subtask to coordinator",
+  description: 'Report progress on a subtask to coordinator',
   args: {
-    project_key: tool.schema.string().describe("Project key"),
-    agent_name: tool.schema.string().describe("Agent name"),
-    bead_id: tool.schema.string().describe("Cell ID"),
+    project_key: tool.schema.string().describe('Project key'),
+    agent_name: tool.schema.string().describe('Agent name'),
+    bead_id: tool.schema.string().describe('Cell ID'),
     status: tool.schema
-      .enum(["in_progress", "blocked", "completed", "failed"])
-      .describe("Status"),
-    message: tool.schema.string().optional().describe("Progress message"),
+      .enum(['in_progress', 'blocked', 'completed', 'failed'])
+      .describe('Status'),
+    message: tool.schema.string().optional().describe('Progress message'),
     progress_percent: tool.schema
       .number()
       .min(0)
       .max(100)
       .optional()
-      .describe("Progress %"),
+      .describe('Progress %'),
     files_touched: tool.schema
       .array(tool.schema.string())
       .optional()
-      .describe("Files modified"),
+      .describe('Files modified'),
   },
-  execute: (args, ctx) => execTool("swarm_progress", args, ctx),
+  execute: (args, ctx) => execTool('swarm_progress', args, ctx),
 });
 
 const swarm_complete = tool({
   description:
-    "Mark subtask complete with Verification Gate. Runs typecheck and tests before allowing completion.",
+    'Mark subtask complete with Verification Gate. Runs typecheck and tests before allowing completion.',
   args: {
-    project_key: tool.schema.string().describe("Project key"),
-    agent_name: tool.schema.string().describe("Agent name"),
-    bead_id: tool.schema.string().describe("Cell ID"),
-    summary: tool.schema.string().describe("Completion summary"),
-    evaluation: tool.schema.string().optional().describe("Self-evaluation JSON"),
+    project_key: tool.schema.string().describe('Project key'),
+    agent_name: tool.schema.string().describe('Agent name'),
+    bead_id: tool.schema.string().describe('Cell ID'),
+    summary: tool.schema.string().describe('Completion summary'),
+    evaluation: tool.schema
+      .string()
+      .optional()
+      .describe('Self-evaluation JSON'),
     files_touched: tool.schema
       .array(tool.schema.string())
       .optional()
-      .describe("Files modified - will be verified"),
+      .describe('Files modified - will be verified'),
     skip_verification: tool.schema
       .boolean()
       .optional()
-      .describe("Skip ALL verification (typecheck, tests)"),
+      .describe('Skip ALL verification (typecheck, tests)'),
     skip_review: tool.schema
       .boolean()
       .optional()
-      .describe("Skip review gate check"),
+      .describe('Skip review gate check'),
   },
-  execute: (args, ctx) => execTool("swarm_complete", args, ctx),
+  execute: (args, ctx) => execTool('swarm_complete', args, ctx),
 });
 
 const swarm_record_outcome = tool({
-  description: "Record subtask outcome for implicit feedback scoring",
+  description: 'Record subtask outcome for implicit feedback scoring',
   args: {
-    bead_id: tool.schema.string().describe("Cell ID"),
-    duration_ms: tool.schema.number().int().min(0).describe("Duration in ms"),
+    bead_id: tool.schema.string().describe('Cell ID'),
+    duration_ms: tool.schema.number().int().min(0).describe('Duration in ms'),
     error_count: tool.schema
       .number()
       .int()
       .min(0)
       .optional()
-      .describe("Error count"),
+      .describe('Error count'),
     retry_count: tool.schema
       .number()
       .int()
       .min(0)
       .optional()
-      .describe("Retry count"),
-    success: tool.schema.boolean().describe("Whether task succeeded"),
+      .describe('Retry count'),
+    success: tool.schema.boolean().describe('Whether task succeeded'),
     files_touched: tool.schema
       .array(tool.schema.string())
       .optional()
-      .describe("Files modified"),
+      .describe('Files modified'),
     criteria: tool.schema
       .array(tool.schema.string())
       .optional()
-      .describe("Evaluation criteria"),
+      .describe('Evaluation criteria'),
     strategy: tool.schema
-      .enum(["file-based", "feature-based", "risk-based"])
+      .enum(['file-based', 'feature-based', 'risk-based'])
       .optional()
-      .describe("Strategy used"),
+      .describe('Strategy used'),
   },
-  execute: (args, ctx) => execTool("swarm_record_outcome", args, ctx),
+  execute: (args, ctx) => execTool('swarm_record_outcome', args, ctx),
 });
 
 const swarm_subtask_prompt = tool({
-  description: "Generate the prompt for a spawned subtask agent",
+  description: 'Generate the prompt for a spawned subtask agent',
   args: {
-    agent_name: tool.schema.string().describe("Agent name"),
-    bead_id: tool.schema.string().describe("Cell ID"),
-    epic_id: tool.schema.string().describe("Epic ID"),
-    subtask_title: tool.schema.string().describe("Subtask title"),
+    agent_name: tool.schema.string().describe('Agent name'),
+    bead_id: tool.schema.string().describe('Cell ID'),
+    epic_id: tool.schema.string().describe('Epic ID'),
+    subtask_title: tool.schema.string().describe('Subtask title'),
     subtask_description: tool.schema
       .string()
       .optional()
-      .describe("Description"),
-    files: tool.schema.array(tool.schema.string()).describe("Files to work on"),
-    shared_context: tool.schema.string().optional().describe("Shared context"),
+      .describe('Description'),
+    files: tool.schema.array(tool.schema.string()).describe('Files to work on'),
+    shared_context: tool.schema.string().optional().describe('Shared context'),
   },
-  execute: (args, ctx) => execTool("swarm_subtask_prompt", args, ctx),
+  execute: (args, ctx) => execTool('swarm_subtask_prompt', args, ctx),
 });
 
 const swarm_spawn_subtask = tool({
-  description: "Prepare a subtask for spawning with Task tool",
+  description: 'Prepare a subtask for spawning with Task tool',
   args: {
-    bead_id: tool.schema.string().describe("Cell ID"),
-    epic_id: tool.schema.string().describe("Epic ID"),
-    subtask_title: tool.schema.string().describe("Subtask title"),
+    bead_id: tool.schema.string().describe('Cell ID'),
+    epic_id: tool.schema.string().describe('Epic ID'),
+    subtask_title: tool.schema.string().describe('Subtask title'),
     subtask_description: tool.schema
       .string()
       .optional()
-      .describe("Description"),
-    files: tool.schema.array(tool.schema.string()).describe("Files to work on"),
-    shared_context: tool.schema.string().optional().describe("Shared context"),
+      .describe('Description'),
+    files: tool.schema.array(tool.schema.string()).describe('Files to work on'),
+    shared_context: tool.schema.string().optional().describe('Shared context'),
   },
-  execute: (args, ctx) => execTool("swarm_spawn_subtask", args, ctx),
+  execute: (args, ctx) => execTool('swarm_spawn_subtask', args, ctx),
 });
 
 const swarm_complete_subtask = tool({
-  description: "Handle subtask completion after Task agent returns",
+  description: 'Handle subtask completion after Task agent returns',
   args: {
-    bead_id: tool.schema.string().describe("Cell ID"),
-    task_result: tool.schema.string().describe("Task result JSON"),
+    bead_id: tool.schema.string().describe('Cell ID'),
+    task_result: tool.schema.string().describe('Task result JSON'),
     files_touched: tool.schema
       .array(tool.schema.string())
       .optional()
-      .describe("Files modified"),
+      .describe('Files modified'),
   },
-  execute: (args, ctx) => execTool("swarm_complete_subtask", args, ctx),
+  execute: (args, ctx) => execTool('swarm_complete_subtask', args, ctx),
 });
 
 const swarm_evaluation_prompt = tool({
-  description: "Generate self-evaluation prompt for a completed subtask",
+  description: 'Generate self-evaluation prompt for a completed subtask',
   args: {
-    bead_id: tool.schema.string().describe("Cell ID"),
-    subtask_title: tool.schema.string().describe("Subtask title"),
+    bead_id: tool.schema.string().describe('Cell ID'),
+    subtask_title: tool.schema.string().describe('Subtask title'),
     files_touched: tool.schema
       .array(tool.schema.string())
-      .describe("Files modified"),
+      .describe('Files modified'),
   },
-  execute: (args, ctx) => execTool("swarm_evaluation_prompt", args, ctx),
+  execute: (args, ctx) => execTool('swarm_evaluation_prompt', args, ctx),
 });
 
 const swarm_broadcast = tool({
   description:
-    "Broadcast context update to all agents working on the same epic",
+    'Broadcast context update to all agents working on the same epic',
   args: {
-    project_path: tool.schema.string().describe("Project path"),
-    agent_name: tool.schema.string().describe("Agent name"),
-    epic_id: tool.schema.string().describe("Epic ID"),
-    message: tool.schema.string().describe("Context update message"),
+    project_path: tool.schema.string().describe('Project path'),
+    agent_name: tool.schema.string().describe('Agent name'),
+    epic_id: tool.schema.string().describe('Epic ID'),
+    message: tool.schema.string().describe('Context update message'),
     importance: tool.schema
-      .enum(["info", "warning", "blocker"])
+      .enum(['info', 'warning', 'blocker'])
       .optional()
-      .describe("Priority level (default: info)"),
+      .describe('Priority level (default: info)'),
     files_affected: tool.schema
       .array(tool.schema.string())
       .optional()
-      .describe("Files this context relates to"),
+      .describe('Files this context relates to'),
   },
-  execute: (args, ctx) => execTool("swarm_broadcast", args, ctx),
+  execute: (args, ctx) => execTool('swarm_broadcast', args, ctx),
 });
 
 // =============================================================================
@@ -1336,51 +1448,62 @@ const swarm_broadcast = tool({
 
 const swarm_worktree_create = tool({
   description:
-    "Create a git worktree for isolated task execution. Worker operates in worktree, not main branch.",
+    'Create a git worktree for isolated task execution. Worker operates in worktree, not main branch.',
   args: {
-    project_path: tool.schema.string().describe("Absolute path to project root"),
-    task_id: tool.schema.string().describe("Task/bead ID (e.g., bd-abc123.1)"),
+    project_path: tool.schema
+      .string()
+      .describe('Absolute path to project root'),
+    task_id: tool.schema.string().describe('Task/bead ID (e.g., bd-abc123.1)'),
     start_commit: tool.schema
       .string()
-      .describe("Commit SHA to create worktree at (swarm start point)"),
+      .describe('Commit SHA to create worktree at (swarm start point)'),
   },
-  execute: (args, ctx) => execTool("swarm_worktree_create", args, ctx),
+  execute: (args, ctx) => execTool('swarm_worktree_create', args, ctx),
 });
 
 const swarm_worktree_merge = tool({
   description:
-    "Cherry-pick commits from worktree back to main branch. Call after worker completes.",
+    'Cherry-pick commits from worktree back to main branch. Call after worker completes.',
   args: {
-    project_path: tool.schema.string().describe("Absolute path to project root"),
-    task_id: tool.schema.string().describe("Task/bead ID"),
+    project_path: tool.schema
+      .string()
+      .describe('Absolute path to project root'),
+    task_id: tool.schema.string().describe('Task/bead ID'),
     start_commit: tool.schema
       .string()
       .optional()
-      .describe("Original start commit (to find new commits)"),
+      .describe('Original start commit (to find new commits)'),
   },
-  execute: (args, ctx) => execTool("swarm_worktree_merge", args, ctx),
+  execute: (args, ctx) => execTool('swarm_worktree_merge', args, ctx),
 });
 
 const swarm_worktree_cleanup = tool({
   description:
-    "Remove a worktree after completion or abort. Idempotent - safe to call multiple times.",
+    'Remove a worktree after completion or abort. Idempotent - safe to call multiple times.',
   args: {
-    project_path: tool.schema.string().describe("Absolute path to project root"),
-    task_id: tool.schema.string().optional().describe("Task/bead ID to clean up"),
+    project_path: tool.schema
+      .string()
+      .describe('Absolute path to project root'),
+    task_id: tool.schema
+      .string()
+      .optional()
+      .describe('Task/bead ID to clean up'),
     cleanup_all: tool.schema
       .boolean()
       .optional()
-      .describe("Remove all worktrees for this project"),
+      .describe('Remove all worktrees for this project'),
   },
-  execute: (args, ctx) => execTool("swarm_worktree_cleanup", args, ctx),
+  execute: (args, ctx) => execTool('swarm_worktree_cleanup', args, ctx),
 });
 
 const swarm_worktree_list = tool({
-  description: "List all active worktrees for a project",
+  description: 'List all active worktrees for a project',
   args: {
-    project_path: tool.schema.string().describe("Absolute path to project root"),
+    project_path: tool.schema
+      .string()
+      .describe('Absolute path to project root'),
   },
-  execute: (args, ctx) => execTool("swarm_worktree_list", args, ctx),
+  execute: (args, ctx) => execTool('swarm_worktree_list', args, ctx),
 });
 
 // =============================================================================
@@ -1389,36 +1512,36 @@ const swarm_worktree_list = tool({
 
 const swarm_review = tool({
   description:
-    "Generate a review prompt for a completed subtask. Includes epic context, dependencies, and diff.",
+    'Generate a review prompt for a completed subtask. Includes epic context, dependencies, and diff.',
   args: {
-    project_key: tool.schema.string().describe("Project path"),
-    epic_id: tool.schema.string().describe("Epic bead ID"),
-    task_id: tool.schema.string().describe("Subtask bead ID to review"),
+    project_key: tool.schema.string().describe('Project path'),
+    epic_id: tool.schema.string().describe('Epic bead ID'),
+    task_id: tool.schema.string().describe('Subtask bead ID to review'),
     files_touched: tool.schema
       .array(tool.schema.string())
       .optional()
-      .describe("Files modified (will get diff for these)"),
+      .describe('Files modified (will get diff for these)'),
   },
-  execute: (args, ctx) => execTool("swarm_review", args, ctx),
+  execute: (args, ctx) => execTool('swarm_review', args, ctx),
 });
 
 const swarm_review_feedback = tool({
   description:
-    "Send review feedback to a worker. Tracks attempts (max 3). Fails task after 3 rejections.",
+    'Send review feedback to a worker. Tracks attempts (max 3). Fails task after 3 rejections.',
   args: {
-    project_key: tool.schema.string().describe("Project path"),
-    task_id: tool.schema.string().describe("Subtask bead ID"),
-    worker_id: tool.schema.string().describe("Worker agent name"),
+    project_key: tool.schema.string().describe('Project path'),
+    task_id: tool.schema.string().describe('Subtask bead ID'),
+    worker_id: tool.schema.string().describe('Worker agent name'),
     status: tool.schema
-      .enum(["approved", "needs_changes"])
-      .describe("Review status"),
-    summary: tool.schema.string().optional().describe("Review summary"),
+      .enum(['approved', 'needs_changes'])
+      .describe('Review status'),
+    summary: tool.schema.string().optional().describe('Review summary'),
     issues: tool.schema
       .string()
       .optional()
-      .describe("JSON array of ReviewIssue objects (for needs_changes)"),
+      .describe('JSON array of ReviewIssue objects (for needs_changes)'),
   },
-  execute: (args, ctx) => execTool("swarm_review_feedback", args, ctx),
+  execute: (args, ctx) => execTool('swarm_review_feedback', args, ctx),
 });
 
 // =============================================================================
@@ -1439,10 +1562,13 @@ Returns structured critique with verdict:
 Credit: VDD methodology from https://github.com/Vomikron/VDD
 Credit: Chainlink patterns from https://github.com/dollspace-gay/chainlink`,
   args: {
-    diff: tool.schema.string().describe("Git diff of changes to review"),
-    test_output: tool.schema.string().optional().describe("Test output (optional)"),
+    diff: tool.schema.string().describe('Git diff of changes to review'),
+    test_output: tool.schema
+      .string()
+      .optional()
+      .describe('Test output (optional)'),
   },
-  execute: (args, ctx) => execTool("swarm_adversarial_review", args, ctx),
+  execute: (args, ctx) => execTool('swarm_adversarial_review', args, ctx),
 });
 
 // =============================================================================
@@ -1451,107 +1577,107 @@ Credit: Chainlink patterns from https://github.com/dollspace-gay/chainlink`,
 
 const skills_list = tool({
   description:
-    "List all available skills from global, project, and bundled sources",
+    'List all available skills from global, project, and bundled sources',
   args: {
     source: tool.schema
-      .enum(["all", "global", "project", "bundled"])
+      .enum(['all', 'global', 'project', 'bundled'])
       .optional()
-      .describe("Filter by source (default: all)"),
+      .describe('Filter by source (default: all)'),
   },
-  execute: (args, ctx) => execTool("skills_list", args, ctx),
+  execute: (args, ctx) => execTool('skills_list', args, ctx),
 });
 
 const skills_read = tool({
   description: "Read a skill's full content including SKILL.md and references",
   args: {
-    name: tool.schema.string().describe("Skill name"),
+    name: tool.schema.string().describe('Skill name'),
   },
-  execute: (args, ctx) => execTool("skills_read", args, ctx),
+  execute: (args, ctx) => execTool('skills_read', args, ctx),
 });
 
 const skills_use = tool({
   description:
     "Get skill content formatted for injection into agent context. Use this when you need to apply a skill's knowledge to the current task.",
   args: {
-    name: tool.schema.string().describe("Skill name"),
+    name: tool.schema.string().describe('Skill name'),
     context: tool.schema
       .string()
       .optional()
-      .describe("Optional context about how the skill will be used"),
+      .describe('Optional context about how the skill will be used'),
   },
-  execute: (args, ctx) => execTool("skills_use", args, ctx),
+  execute: (args, ctx) => execTool('skills_use', args, ctx),
 });
 
 const skills_create = tool({
-  description: "Create a new skill with SKILL.md template",
+  description: 'Create a new skill with SKILL.md template',
   args: {
-    name: tool.schema.string().describe("Skill name (kebab-case)"),
-    description: tool.schema.string().describe("Brief skill description"),
+    name: tool.schema.string().describe('Skill name (kebab-case)'),
+    description: tool.schema.string().describe('Brief skill description'),
     scope: tool.schema
-      .enum(["global", "project"])
+      .enum(['global', 'project'])
       .optional()
-      .describe("Where to create (default: project)"),
+      .describe('Where to create (default: project)'),
     tags: tool.schema
       .array(tool.schema.string())
       .optional()
-      .describe("Skill tags for discovery"),
+      .describe('Skill tags for discovery'),
   },
-  execute: (args, ctx) => execTool("skills_create", args, ctx),
+  execute: (args, ctx) => execTool('skills_create', args, ctx),
 });
 
 const skills_update = tool({
   description: "Update an existing skill's SKILL.md content",
   args: {
-    name: tool.schema.string().describe("Skill name"),
-    content: tool.schema.string().describe("New SKILL.md content"),
+    name: tool.schema.string().describe('Skill name'),
+    content: tool.schema.string().describe('New SKILL.md content'),
   },
-  execute: (args, ctx) => execTool("skills_update", args, ctx),
+  execute: (args, ctx) => execTool('skills_update', args, ctx),
 });
 
 const skills_delete = tool({
-  description: "Delete a skill (project skills only)",
+  description: 'Delete a skill (project skills only)',
   args: {
-    name: tool.schema.string().describe("Skill name"),
+    name: tool.schema.string().describe('Skill name'),
   },
-  execute: (args, ctx) => execTool("skills_delete", args, ctx),
+  execute: (args, ctx) => execTool('skills_delete', args, ctx),
 });
 
 const skills_init = tool({
-  description: "Initialize skills directory in current project",
+  description: 'Initialize skills directory in current project',
   args: {
     path: tool.schema
       .string()
       .optional()
-      .describe("Custom path (default: .opencode/skills)"),
+      .describe('Custom path (default: .opencode/skills)'),
   },
-  execute: (args, ctx) => execTool("skills_init", args, ctx),
+  execute: (args, ctx) => execTool('skills_init', args, ctx),
 });
 
 const skills_add_script = tool({
-  description: "Add an executable script to a skill",
+  description: 'Add an executable script to a skill',
   args: {
-    skill_name: tool.schema.string().describe("Skill name"),
-    script_name: tool.schema.string().describe("Script filename"),
-    content: tool.schema.string().describe("Script content"),
+    skill_name: tool.schema.string().describe('Skill name'),
+    script_name: tool.schema.string().describe('Script filename'),
+    content: tool.schema.string().describe('Script content'),
     executable: tool.schema
       .boolean()
       .optional()
-      .describe("Make executable (default: true)"),
+      .describe('Make executable (default: true)'),
   },
-  execute: (args, ctx) => execTool("skills_add_script", args, ctx),
+  execute: (args, ctx) => execTool('skills_add_script', args, ctx),
 });
 
 const skills_execute = tool({
   description: "Execute a skill's script",
   args: {
-    skill_name: tool.schema.string().describe("Skill name"),
-    script_name: tool.schema.string().describe("Script to execute"),
+    skill_name: tool.schema.string().describe('Skill name'),
+    script_name: tool.schema.string().describe('Script to execute'),
     args: tool.schema
       .array(tool.schema.string())
       .optional()
-      .describe("Script arguments"),
+      .describe('Script arguments'),
   },
-  execute: (args, ctx) => execTool("skills_execute", args, ctx),
+  execute: (args, ctx) => execTool('skills_execute', args, ctx),
 });
 
 // =============================================================================
@@ -1559,25 +1685,32 @@ const skills_execute = tool({
 // =============================================================================
 
 const swarm_get_strategy_insights = tool({
-  description: "Get strategy success rates for decomposition planning. Use this when planning task decomposition to see which strategies (file-based, feature-based, risk-based) have historically succeeded or failed. Returns success rates and recommendations based on past swarm outcomes.",
+  description:
+    'Get strategy success rates for decomposition planning. Use this when planning task decomposition to see which strategies (file-based, feature-based, risk-based) have historically succeeded or failed. Returns success rates and recommendations based on past swarm outcomes.',
   args: {
-    task: tool.schema.string().describe("Task description to analyze for strategy recommendation"),
+    task: tool.schema
+      .string()
+      .describe('Task description to analyze for strategy recommendation'),
   },
-  execute: (args, ctx) => execTool("swarm_get_strategy_insights", args, ctx),
+  execute: (args, ctx) => execTool('swarm_get_strategy_insights', args, ctx),
 });
 
 const swarm_get_file_insights = tool({
-  description: "Get file-specific gotchas for worker context. Use this when assigning files to workers to warn them about historical failure patterns. Queries past outcomes and semantic memory for file-specific learnings (edge cases, common bugs, performance traps).",
+  description:
+    'Get file-specific gotchas for worker context. Use this when assigning files to workers to warn them about historical failure patterns. Queries past outcomes and semantic memory for file-specific learnings (edge cases, common bugs, performance traps).',
   args: {
-    files: tool.schema.array(tool.schema.string()).describe("File paths to get insights for"),
+    files: tool.schema
+      .array(tool.schema.string())
+      .describe('File paths to get insights for'),
   },
-  execute: (args, ctx) => execTool("swarm_get_file_insights", args, ctx),
+  execute: (args, ctx) => execTool('swarm_get_file_insights', args, ctx),
 });
 
 const swarm_get_pattern_insights = tool({
-  description: "Get common failure patterns across swarms. Use this during planning or when debugging stuck swarms to see recurring anti-patterns (type errors, timeouts, conflicts, test failures). Returns top 5 most frequent failure patterns with recommendations.",
+  description:
+    'Get common failure patterns across swarms. Use this during planning or when debugging stuck swarms to see recurring anti-patterns (type errors, timeouts, conflicts, test failures). Returns top 5 most frequent failure patterns with recommendations.',
   args: {},
-  execute: (args, ctx) => execTool("swarm_get_pattern_insights", args, ctx),
+  execute: (args, ctx) => execTool('swarm_get_pattern_insights', args, ctx),
 });
 
 // =============================================================================
@@ -1585,9 +1718,12 @@ const swarm_get_pattern_insights = tool({
 // =============================================================================
 
 const cass_search = tool({
-  description: "Search across all AI coding agent histories (Claude, Codex, Cursor, Gemini, Aider, ChatGPT, Cline, OpenCode, Amp, Pi-Agent). Query BEFORE solving problems from scratch - another agent may have already solved it. Returns matching sessions ranked by relevance.",
+  description:
+    'Search across all AI coding agent histories (Claude, Codex, Cursor, Gemini, Aider, ChatGPT, Cline, OpenCode, Amp, Pi-Agent). Query BEFORE solving problems from scratch - another agent may have already solved it. Returns matching sessions ranked by relevance.',
   args: {
-    query: tool.schema.string().describe("Search query (e.g., 'authentication error Next.js')"),
+    query: tool.schema
+      .string()
+      .describe("Search query (e.g., 'authentication error Next.js')"),
     agent: tool.schema
       .string()
       .optional()
@@ -1595,71 +1731,74 @@ const cass_search = tool({
     days: tool.schema
       .number()
       .optional()
-      .describe("Only search sessions from last N days"),
+      .describe('Only search sessions from last N days'),
     limit: tool.schema
       .number()
       .optional()
-      .describe("Max results to return (default: 5)"),
+      .describe('Max results to return (default: 5)'),
     fields: tool.schema
       .string()
       .optional()
-      .describe("Field selection: 'minimal' for compact output (path, line, agent only)"),
+      .describe(
+        "Field selection: 'minimal' for compact output (path, line, agent only)",
+      ),
   },
-  execute: (args, ctx) => execTool("cass_search", args, ctx),
+  execute: (args, ctx) => execTool('cass_search', args, ctx),
 });
 
 const cass_view = tool({
-  description: "View a specific conversation/session from search results. Use source_path from cass_search output.",
+  description:
+    'View a specific conversation/session from search results. Use source_path from cass_search output.',
   args: {
     path: tool.schema
       .string()
-      .describe("Path to session file (from cass_search results)"),
+      .describe('Path to session file (from cass_search results)'),
     line: tool.schema
       .number()
       .optional()
-      .describe("Jump to specific line number"),
+      .describe('Jump to specific line number'),
   },
-  execute: (args, ctx) => execTool("cass_view", args, ctx),
+  execute: (args, ctx) => execTool('cass_view', args, ctx),
 });
 
 const cass_expand = tool({
-  description: "Expand context around a specific line in a session. Shows messages before/after.",
+  description:
+    'Expand context around a specific line in a session. Shows messages before/after.',
   args: {
-    path: tool.schema
-      .string()
-      .describe("Path to session file"),
-    line: tool.schema
-      .number()
-      .describe("Line number to expand around"),
+    path: tool.schema.string().describe('Path to session file'),
+    line: tool.schema.number().describe('Line number to expand around'),
     context: tool.schema
       .number()
       .optional()
-      .describe("Number of lines before/after to show (default: 5)"),
+      .describe('Number of lines before/after to show (default: 5)'),
   },
-  execute: (args, ctx) => execTool("cass_expand", args, ctx),
+  execute: (args, ctx) => execTool('cass_expand', args, ctx),
 });
 
 const cass_health = tool({
-  description: "Check if cass index is healthy. Exit 0 = ready, Exit 1 = needs indexing. Run this before searching.",
+  description:
+    'Check if cass index is healthy. Exit 0 = ready, Exit 1 = needs indexing. Run this before searching.',
   args: {},
-  execute: (args, ctx) => execTool("cass_health", args, ctx),
+  execute: (args, ctx) => execTool('cass_health', args, ctx),
 });
 
 const cass_index = tool({
-  description: "Build or rebuild the search index. Run this if health check fails or to pick up new sessions.",
+  description:
+    'Build or rebuild the search index. Run this if health check fails or to pick up new sessions.',
   args: {
     full: tool.schema
       .boolean()
       .optional()
-      .describe("Force full rebuild (default: incremental)"),
+      .describe('Force full rebuild (default: incremental)'),
   },
-  execute: (args, ctx) => execTool("cass_index", args, ctx),
+  execute: (args, ctx) => execTool('cass_index', args, ctx),
 });
 
 const cass_stats = tool({
-  description: "Show index statistics - how many sessions, messages, agents indexed.",
+  description:
+    'Show index statistics - how many sessions, messages, agents indexed.',
   args: {},
-  execute: (args, ctx) => execTool("cass_stats", args, ctx),
+  execute: (args, ctx) => execTool('cass_stats', args, ctx),
 });
 
 // =============================================================================
@@ -1667,64 +1806,88 @@ const cass_stats = tool({
 // =============================================================================
 
 const hivemind_store = tool({
-  description: "Store a memory (learnings, decisions, patterns) with metadata and tags. Include WHY, not just WHAT.",
+  description:
+    'Store a memory (learnings, decisions, patterns) with metadata and tags. Include WHY, not just WHAT.',
   args: {
-    information: tool.schema.string().describe("The learning, decision, or pattern to store (include context and reasoning)"),
-    tags: tool.schema.string().optional().describe("Comma-separated tags for categorization (e.g., 'auth,oauth,tokens')"),
+    information: tool.schema
+      .string()
+      .describe(
+        'The learning, decision, or pattern to store (include context and reasoning)',
+      ),
+    tags: tool.schema
+      .string()
+      .optional()
+      .describe(
+        "Comma-separated tags for categorization (e.g., 'auth,oauth,tokens')",
+      ),
   },
-  execute: (args, ctx) => execTool("hivemind_store", args, ctx),
+  execute: (args, ctx) => execTool('hivemind_store', args, ctx),
 });
 
 const hivemind_find = tool({
-  description: "Search all memories (learnings + sessions) by semantic similarity. Use BEFORE implementing to check if any agent solved it before.",
+  description:
+    'Search all memories (learnings + sessions) by semantic similarity. Use BEFORE implementing to check if any agent solved it before.',
   args: {
-    query: tool.schema.string().describe("Search query (e.g., 'token refresh race condition')"),
-    limit: tool.schema.number().optional().describe("Max results to return (default: 5)"),
-    collection: tool.schema.string().optional().describe("Filter by collection: 'default' (learnings), 'claude', 'cursor', etc., or omit for all"),
+    query: tool.schema
+      .string()
+      .describe("Search query (e.g., 'token refresh race condition')"),
+    limit: tool.schema
+      .number()
+      .optional()
+      .describe('Max results to return (default: 5)'),
+    collection: tool.schema
+      .string()
+      .optional()
+      .describe(
+        "Filter by collection: 'default' (learnings), 'claude', 'cursor', etc., or omit for all",
+      ),
   },
-  execute: (args, ctx) => execTool("hivemind_find", args, ctx),
+  execute: (args, ctx) => execTool('hivemind_find', args, ctx),
 });
 
 const hivemind_get = tool({
-  description: "Get specific memory by ID",
+  description: 'Get specific memory by ID',
   args: {
     id: tool.schema.string().describe("Memory ID (e.g., 'mem_xyz123')"),
   },
-  execute: (args, ctx) => execTool("hivemind_get", args, ctx),
+  execute: (args, ctx) => execTool('hivemind_get', args, ctx),
 });
 
 const hivemind_remove = tool({
-  description: "Delete outdated/incorrect memory",
+  description: 'Delete outdated/incorrect memory',
   args: {
-    id: tool.schema.string().describe("Memory ID to remove"),
+    id: tool.schema.string().describe('Memory ID to remove'),
   },
-  execute: (args, ctx) => execTool("hivemind_remove", args, ctx),
+  execute: (args, ctx) => execTool('hivemind_remove', args, ctx),
 });
 
 const hivemind_validate = tool({
-  description: "Confirm memory is still accurate (resets 90-day decay timer)",
+  description: 'Confirm memory is still accurate (resets 90-day decay timer)',
   args: {
-    id: tool.schema.string().describe("Memory ID to validate"),
+    id: tool.schema.string().describe('Memory ID to validate'),
   },
-  execute: (args, ctx) => execTool("hivemind_validate", args, ctx),
+  execute: (args, ctx) => execTool('hivemind_validate', args, ctx),
 });
 
 const hivemind_stats = tool({
-  description: "Memory statistics and health check (documents, chunks, embeddings)",
+  description:
+    'Memory statistics and health check (documents, chunks, embeddings)',
   args: {},
-  execute: (args, ctx) => execTool("hivemind_stats", args, ctx),
+  execute: (args, ctx) => execTool('hivemind_stats', args, ctx),
 });
 
 const hivemind_index = tool({
-  description: "Index AI session directories (automatically indexes ~/.config/opencode/sessions, ~/.cursor-tutor, etc.)",
+  description:
+    'Index AI session directories (automatically indexes ~/.config/opencode/sessions, ~/.cursor-tutor, etc.)',
   args: {},
-  execute: (args, ctx) => execTool("hivemind_index", args, ctx),
+  execute: (args, ctx) => execTool('hivemind_index', args, ctx),
 });
 
 const hivemind_sync = tool({
-  description: "Sync learnings to .hive/memories.jsonl for git-backed team sharing",
+  description:
+    'Sync learnings to .hive/memories.jsonl for git-backed team sharing',
   args: {},
-  execute: (args, ctx) => execTool("hivemind_sync", args, ctx),
+  execute: (args, ctx) => execTool('hivemind_sync', args, ctx),
 });
 
 // =============================================================================
@@ -1740,20 +1903,20 @@ const hivemind_sync = tool({
  */
 interface SwarmDetection {
   detected: boolean;
-  confidence: "high" | "medium" | "low" | "none";
+  confidence: 'high' | 'medium' | 'low' | 'none';
   reasons: string[];
 }
 
 /**
  * Structured state snapshot for LLM-powered compaction
- * 
+ *
  * This is passed to the lite model to generate a continuation prompt
  * with concrete data instead of just instructions.
  */
 interface SwarmStateSnapshot {
   sessionID: string;
   detection: {
-    confidence: "high" | "medium" | "low" | "none";
+    confidence: 'high' | 'medium' | 'low' | 'none';
     reasons: string[];
   };
   epic?: {
@@ -1763,7 +1926,7 @@ interface SwarmStateSnapshot {
     subtasks: Array<{
       id: string;
       title: string;
-      status: "open" | "in_progress" | "blocked" | "closed";
+      status: 'open' | 'in_progress' | 'blocked' | 'closed';
       files: string[];
       assignedTo?: string;
     }>;
@@ -1786,14 +1949,14 @@ interface SwarmStateSnapshot {
 
 /**
  * Query actual swarm state using spawn (like detectSwarm does)
- * 
+ *
  * Returns structured snapshot of current state for LLM compaction.
  * Shells out to swarm CLI to get real data.
  */
 async function querySwarmState(sessionID: string): Promise<SwarmStateSnapshot> {
   const startTime = Date.now();
-  
-  logCompaction("debug", "query_swarm_state_start", {
+
+  logCompaction('debug', 'query_swarm_state_start', {
     session_id: sessionID,
     project_directory: projectDirectory,
   });
@@ -1801,28 +1964,30 @@ async function querySwarmState(sessionID: string): Promise<SwarmStateSnapshot> {
   try {
     // Query cells via swarm CLI
     const cliStart = Date.now();
-    const cellsResult = await new Promise<{ exitCode: number; stdout: string; stderr: string }>(
-      (resolve) => {
-        const proc = spawn(SWARM_CLI, ["tool", "hive_query"], {
-          cwd: projectDirectory,
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-        let stdout = "";
-        let stderr = "";
-        proc.stdout.on("data", (d) => {
-          stdout += d;
-        });
-        proc.stderr.on("data", (d) => {
-          stderr += d;
-        });
-        proc.on("close", (exitCode) =>
-          resolve({ exitCode: exitCode ?? 1, stdout, stderr }),
-        );
-      },
-    );
+    const cellsResult = await new Promise<{
+      exitCode: number;
+      stdout: string;
+      stderr: string;
+    }>((resolve) => {
+      const proc = spawn(SWARM_CLI, ['tool', 'hive_query'], {
+        cwd: projectDirectory,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let stdout = '';
+      let stderr = '';
+      proc.stdout.on('data', (d) => {
+        stdout += d;
+      });
+      proc.stderr.on('data', (d) => {
+        stderr += d;
+      });
+      proc.on('close', (exitCode) =>
+        resolve({ exitCode: exitCode ?? 1, stdout, stderr }),
+      );
+    });
     const cliDuration = Date.now() - cliStart;
 
-    logCompaction("debug", "query_swarm_state_cli_complete", {
+    logCompaction('debug', 'query_swarm_state_cli_complete', {
       session_id: sessionID,
       duration_ms: cliDuration,
       exit_code: cellsResult.exitCode,
@@ -1837,15 +2002,16 @@ async function querySwarmState(sessionID: string): Promise<SwarmStateSnapshot> {
         // Handle wrapped response: { success: true, data: [...] }
         cells = Array.isArray(parsed) ? parsed : (parsed?.data ?? []);
       } catch (parseErr) {
-        logCompaction("error", "query_swarm_state_parse_failed", {
+        logCompaction('error', 'query_swarm_state_parse_failed', {
           session_id: sessionID,
-          error: parseErr instanceof Error ? parseErr.message : String(parseErr),
+          error:
+            parseErr instanceof Error ? parseErr.message : String(parseErr),
           stdout_preview: cellsResult.stdout.substring(0, 500),
         });
       }
     }
 
-    logCompaction("debug", "query_swarm_state_cells_parsed", {
+    logCompaction('debug', 'query_swarm_state_cells_parsed', {
       session_id: sessionID,
       cell_count: cells.length,
       cells: cells.map((c: any) => ({
@@ -1860,25 +2026,25 @@ async function querySwarmState(sessionID: string): Promise<SwarmStateSnapshot> {
     // Find active epic (first unclosed epic with subtasks)
     const openEpics = cells.filter(
       (c: { type?: string; status: string }) =>
-        c.type === "epic" && c.status !== "closed",
+        c.type === 'epic' && c.status !== 'closed',
     );
     const epic = openEpics[0];
 
-    logCompaction("debug", "query_swarm_state_epics", {
+    logCompaction('debug', 'query_swarm_state_epics', {
       session_id: sessionID,
       open_epic_count: openEpics.length,
-      selected_epic: epic ? { id: epic.id, title: epic.title, status: epic.status } : null,
+      selected_epic: epic
+        ? { id: epic.id, title: epic.title, status: epic.status }
+        : null,
     });
 
     // Get subtasks if we have an epic
     const subtasks =
       epic && epic.id
-        ? cells.filter(
-            (c: { parent_id?: string }) => c.parent_id === epic.id,
-          )
+        ? cells.filter((c: { parent_id?: string }) => c.parent_id === epic.id)
         : [];
 
-    logCompaction("debug", "query_swarm_state_subtasks", {
+    logCompaction('debug', 'query_swarm_state_subtasks', {
       session_id: sessionID,
       subtask_count: subtasks.length,
       subtasks: subtasks.map((s: any) => ({
@@ -1891,8 +2057,8 @@ async function querySwarmState(sessionID: string): Promise<SwarmStateSnapshot> {
 
     // TODO: Query swarm mail for messages and reservations
     // For MVP, use empty arrays - the fallback chain handles this
-    const messages: SwarmStateSnapshot["messages"] = [];
-    const reservations: SwarmStateSnapshot["reservations"] = [];
+    const messages: SwarmStateSnapshot['messages'] = [];
+    const reservations: SwarmStateSnapshot['reservations'] = [];
 
     // Run detection for confidence (already logged internally)
     const detection = await detectSwarm();
@@ -1908,17 +2074,23 @@ async function querySwarmState(sessionID: string): Promise<SwarmStateSnapshot> {
             id: epic.id,
             title: epic.title,
             status: epic.status,
-            subtasks: subtasks.map((s: {
-              id: string;
-              title: string;
-              status: string;
-              files?: string[];
-            }) => ({
-              id: s.id,
-              title: s.title,
-              status: s.status as "open" | "in_progress" | "blocked" | "closed",
-              files: s.files || [],
-            })),
+            subtasks: subtasks.map(
+              (s: {
+                id: string;
+                title: string;
+                status: string;
+                files?: string[];
+              }) => ({
+                id: s.id,
+                title: s.title,
+                status: s.status as
+                  | 'open'
+                  | 'in_progress'
+                  | 'blocked'
+                  | 'closed',
+                files: s.files || [],
+              }),
+            ),
           }
         : undefined,
       messages,
@@ -1926,7 +2098,7 @@ async function querySwarmState(sessionID: string): Promise<SwarmStateSnapshot> {
     };
 
     const totalDuration = Date.now() - startTime;
-    logCompaction("debug", "query_swarm_state_complete", {
+    logCompaction('debug', 'query_swarm_state_complete', {
       session_id: sessionID,
       duration_ms: totalDuration,
       has_epic: !!snapshot.epic,
@@ -1938,7 +2110,7 @@ async function querySwarmState(sessionID: string): Promise<SwarmStateSnapshot> {
 
     return snapshot;
   } catch (err) {
-    logCompaction("error", "query_swarm_state_exception", {
+    logCompaction('error', 'query_swarm_state_exception', {
       session_id: sessionID,
       error: err instanceof Error ? err.message : String(err),
       stack: err instanceof Error ? err.stack : undefined,
@@ -1961,19 +2133,19 @@ async function querySwarmState(sessionID: string): Promise<SwarmStateSnapshot> {
 
 /**
  * Generate compaction prompt using LLM
- * 
+ *
  * Shells out to `opencode run -m <liteModel>` with structured state.
  * Returns markdown continuation prompt or null on failure.
- * 
+ *
  * Timeout: 30 seconds
  */
 async function generateCompactionPrompt(
   snapshot: SwarmStateSnapshot,
 ): Promise<string | null> {
   const startTime = Date.now();
-  const liteModel = process.env.OPENCODE_LITE_MODEL || "__SWARM_LITE_MODEL__";
+  const liteModel = process.env.OPENCODE_LITE_MODEL || '__SWARM_LITE_MODEL__';
 
-  logCompaction("debug", "generate_compaction_prompt_start", {
+  logCompaction('debug', 'generate_compaction_prompt_start', {
     session_id: snapshot.sessionID,
     lite_model: liteModel,
     has_epic: !!snapshot.epic,
@@ -2053,7 +2225,7 @@ Generate a prompt following this structure:
 
 Keep the prompt concise but actionable. Use actual data from the snapshot, not placeholders. Include the ASCII header and ALL coordinator mandates.`;
 
-    logCompaction("debug", "generate_compaction_prompt_calling_llm", {
+    logCompaction('debug', 'generate_compaction_prompt_calling_llm', {
       session_id: snapshot.sessionID,
       prompt_length: promptText.length,
       model: liteModel,
@@ -2061,42 +2233,48 @@ Keep the prompt concise but actionable. Use actual data from the snapshot, not p
     });
 
     const llmStart = Date.now();
-    const result = await new Promise<{ exitCode: number; stdout: string; stderr: string }>(
-      (resolve, reject) => {
-        const proc = spawn(OPENCODE_CLI, ["run", "-m", liteModel, "--", promptText], {
+    const result = await new Promise<{
+      exitCode: number;
+      stdout: string;
+      stderr: string;
+    }>((resolve, reject) => {
+      const proc = spawn(
+        OPENCODE_CLI,
+        ['run', '-m', liteModel, '--', promptText],
+        {
           cwd: projectDirectory,
-          stdio: ["ignore", "pipe", "pipe"],
+          stdio: ['ignore', 'pipe', 'pipe'],
           timeout: 30000, // 30 second timeout
-        });
+        },
+      );
 
-        let stdout = "";
-        let stderr = "";
+      let stdout = '';
+      let stderr = '';
 
-        proc.stdout.on("data", (d) => {
-          stdout += d;
-        });
-        proc.stderr.on("data", (d) => {
-          stderr += d;
-        });
+      proc.stdout.on('data', (d) => {
+        stdout += d;
+      });
+      proc.stderr.on('data', (d) => {
+        stderr += d;
+      });
 
-        proc.on("close", (exitCode) => {
-          resolve({ exitCode: exitCode ?? 1, stdout, stderr });
-        });
+      proc.on('close', (exitCode) => {
+        resolve({ exitCode: exitCode ?? 1, stdout, stderr });
+      });
 
-        proc.on("error", (err) => {
-          reject(err);
-        });
+      proc.on('error', (err) => {
+        reject(err);
+      });
 
-        // Timeout handling
-        setTimeout(() => {
-          proc.kill("SIGTERM");
-          reject(new Error("LLM compaction timeout (30s)"));
-        }, 30000);
-      },
-    );
+      // Timeout handling
+      setTimeout(() => {
+        proc.kill('SIGTERM');
+        reject(new Error('LLM compaction timeout (30s)'));
+      }, 30000);
+    });
     const llmDuration = Date.now() - llmStart;
 
-    logCompaction("debug", "generate_compaction_prompt_llm_complete", {
+    logCompaction('debug', 'generate_compaction_prompt_llm_complete', {
       session_id: snapshot.sessionID,
       duration_ms: llmDuration,
       exit_code: result.exitCode,
@@ -2107,7 +2285,7 @@ Keep the prompt concise but actionable. Use actual data from the snapshot, not p
     });
 
     if (result.exitCode !== 0) {
-      logCompaction("error", "generate_compaction_prompt_llm_failed", {
+      logCompaction('error', 'generate_compaction_prompt_llm_failed', {
         session_id: snapshot.sessionID,
         exit_code: result.exitCode,
         stderr: result.stderr,
@@ -2119,9 +2297,9 @@ Keep the prompt concise but actionable. Use actual data from the snapshot, not p
 
     // Extract the prompt from stdout (LLM may wrap in markdown)
     const prompt = result.stdout.trim();
-    
+
     const totalDuration = Date.now() - startTime;
-    logCompaction("debug", "generate_compaction_prompt_success", {
+    logCompaction('debug', 'generate_compaction_prompt_success', {
       session_id: snapshot.sessionID,
       total_duration_ms: totalDuration,
       llm_duration_ms: llmDuration,
@@ -2133,7 +2311,7 @@ Keep the prompt concise but actionable. Use actual data from the snapshot, not p
     return prompt.length > 0 ? prompt : null;
   } catch (err) {
     const totalDuration = Date.now() - startTime;
-    logCompaction("error", "generate_compaction_prompt_exception", {
+    logCompaction('error', 'generate_compaction_prompt_exception', {
       session_id: snapshot.sessionID,
       error: err instanceof Error ? err.message : String(err),
       stack: err instanceof Error ? err.stack : undefined,
@@ -2162,11 +2340,13 @@ interface SessionScanResult {
 
 /**
  * Scan session messages for swarm tool calls
- * 
+ *
  * Uses SDK client to fetch messages and look for swarm activity.
  * This can detect swarm work even if no cells exist yet.
  */
-async function scanSessionMessages(sessionID: string): Promise<SessionScanResult> {
+async function scanSessionMessages(
+  sessionID: string,
+): Promise<SessionScanResult> {
   const startTime = Date.now();
   const result: SessionScanResult = {
     messageCount: 0,
@@ -2175,13 +2355,13 @@ async function scanSessionMessages(sessionID: string): Promise<SessionScanResult
     reasons: [],
   };
 
-  logCompaction("debug", "session_scan_start", {
+  logCompaction('debug', 'session_scan_start', {
     session_id: sessionID,
     has_sdk_client: !!sdkClient,
   });
 
   if (!sdkClient) {
-    logCompaction("warn", "session_scan_no_sdk_client", {
+    logCompaction('warn', 'session_scan_no_sdk_client', {
       session_id: sessionID,
     });
     return result;
@@ -2190,42 +2370,55 @@ async function scanSessionMessages(sessionID: string): Promise<SessionScanResult
   try {
     // Fetch session messages
     const messagesStart = Date.now();
-    const rawResponse = await sdkClient.session.messages({ path: { id: sessionID } });
+    const rawResponse = await sdkClient.session.messages({
+      path: { id: sessionID },
+    });
     const messagesDuration = Date.now() - messagesStart;
 
     // Log the RAW response to understand its shape
-    logCompaction("debug", "session_scan_raw_response", {
+    logCompaction('debug', 'session_scan_raw_response', {
       session_id: sessionID,
       response_type: typeof rawResponse,
       is_array: Array.isArray(rawResponse),
       is_null: rawResponse === null,
       is_undefined: rawResponse === undefined,
-      keys: rawResponse && typeof rawResponse === 'object' ? Object.keys(rawResponse) : [],
+      keys:
+        rawResponse && typeof rawResponse === 'object'
+          ? Object.keys(rawResponse)
+          : [],
       raw_preview: JSON.stringify(rawResponse)?.slice(0, 500),
     });
 
     // The response might be wrapped - check common patterns
-    const messages = Array.isArray(rawResponse) 
-      ? rawResponse 
-      : rawResponse?.data 
-      ? rawResponse.data 
-      : rawResponse?.messages 
-      ? rawResponse.messages 
-      : rawResponse?.items
-      ? rawResponse.items
-      : [];
+    const messages = Array.isArray(rawResponse)
+      ? rawResponse
+      : rawResponse?.data
+        ? rawResponse.data
+        : rawResponse?.messages
+          ? rawResponse.messages
+          : rawResponse?.items
+            ? rawResponse.items
+            : [];
 
     result.messageCount = messages?.length ?? 0;
 
-    logCompaction("debug", "session_scan_messages_fetched", {
+    logCompaction('debug', 'session_scan_messages_fetched', {
       session_id: sessionID,
       duration_ms: messagesDuration,
       message_count: result.messageCount,
-      extraction_method: Array.isArray(rawResponse) ? 'direct_array' : rawResponse?.data ? 'data_field' : rawResponse?.messages ? 'messages_field' : rawResponse?.items ? 'items_field' : 'fallback_empty',
+      extraction_method: Array.isArray(rawResponse)
+        ? 'direct_array'
+        : rawResponse?.data
+          ? 'data_field'
+          : rawResponse?.messages
+            ? 'messages_field'
+            : rawResponse?.items
+              ? 'items_field'
+              : 'fallback_empty',
     });
 
     if (!Array.isArray(messages) || messages.length === 0) {
-      logCompaction("debug", "session_scan_no_messages", {
+      logCompaction('debug', 'session_scan_no_messages', {
         session_id: sessionID,
       });
       return result;
@@ -2234,35 +2427,35 @@ async function scanSessionMessages(sessionID: string): Promise<SessionScanResult
     // Swarm-related tool patterns
     const swarmTools = [
       // High confidence - active swarm coordination
-      "hive_create_epic",
-      "swarm_decompose",
-      "swarm_spawn_subtask",
-      "swarm_complete",
-      "swarmmail_init",
-      "swarmmail_reserve",
+      'hive_create_epic',
+      'swarm_decompose',
+      'swarm_spawn_subtask',
+      'swarm_complete',
+      'swarmmail_init',
+      'swarmmail_reserve',
       // Medium confidence - swarm activity
-      "hive_start",
-      "hive_close",
-      "swarm_status",
-      "swarm_progress",
-      "swarmmail_send",
+      'hive_start',
+      'hive_close',
+      'swarm_status',
+      'swarm_progress',
+      'swarmmail_send',
       // Low confidence - possible swarm
-      "hive_create",
-      "hive_query",
+      'hive_create',
+      'hive_query',
     ];
 
     const highConfidenceTools = new Set([
-      "hive_create_epic",
-      "swarm_decompose",
-      "swarm_spawn_subtask",
-      "swarmmail_init",
-      "swarmmail_reserve",
+      'hive_create_epic',
+      'swarm_decompose',
+      'swarm_spawn_subtask',
+      'swarmmail_init',
+      'swarmmail_reserve',
     ]);
 
     // Scan messages for tool calls
     let swarmToolCount = 0;
     let highConfidenceCount = 0;
-    
+
     // Debug: collect part types to understand message structure
     const partTypeCounts: Record<string, number> = {};
     let messagesWithParts = 0;
@@ -2277,34 +2470,43 @@ async function scanSessionMessages(sessionID: string): Promise<SessionScanResult
       messagesWithParts++;
 
       for (const part of message.parts) {
-        const partType = part.type || "unknown";
+        const partType = part.type || 'unknown';
         partTypeCounts[partType] = (partTypeCounts[partType] || 0) + 1;
-        
+
         // Collect first 10 unique part types for debugging
-        if (samplePartTypes.length < 10 && !samplePartTypes.includes(partType)) {
+        if (
+          samplePartTypes.length < 10 &&
+          !samplePartTypes.includes(partType)
+        ) {
           samplePartTypes.push(partType);
         }
-        
+
         // Check if this is a tool call part
         // OpenCode SDK: ToolPart has type="tool", tool=<string name>, state={...}
-        if (part.type === "tool") {
+        if (part.type === 'tool') {
           const toolPart = part as ToolPart;
           const toolName = toolPart.tool; // tool name is a string directly
-          
+
           if (toolName && swarmTools.includes(toolName)) {
             swarmToolCount++;
-            
+
             if (highConfidenceTools.has(toolName)) {
               highConfidenceCount++;
             }
 
             // Extract args/output/timestamp from state if available
             const state = toolPart.state;
-            const args = state && "input" in state ? state.input : {};
-            const output = state && "output" in state ? state.output : undefined;
-            const timestamp = state && "time" in state && state.time && typeof state.time === "object" && "end" in state.time 
-              ? (state.time as { end: number }).end 
-              : Date.now();
+            const args = state && 'input' in state ? state.input : {};
+            const output =
+              state && 'output' in state ? state.output : undefined;
+            const timestamp =
+              state &&
+              'time' in state &&
+              state.time &&
+              typeof state.time === 'object' &&
+              'end' in state.time
+                ? (state.time as { end: number }).end
+                : Date.now();
 
             result.toolCalls.push({
               toolName,
@@ -2313,7 +2515,7 @@ async function scanSessionMessages(sessionID: string): Promise<SessionScanResult
               timestamp,
             });
 
-            logCompaction("debug", "session_scan_tool_found", {
+            logCompaction('debug', 'session_scan_tool_found', {
               session_id: sessionID,
               tool_name: toolName,
               is_high_confidence: highConfidenceTools.has(toolName),
@@ -2327,10 +2529,10 @@ async function scanSessionMessages(sessionID: string): Promise<SessionScanResult
     // PROJECT SWARM STATE FROM EVENTS (deterministic, no heuristics)
     // =======================================================================
     // Convert tool calls to ToolCallEvent format for projection
-    const events: ToolCallEvent[] = result.toolCalls.map(tc => ({
+    const events: ToolCallEvent[] = result.toolCalls.map((tc) => ({
       tool: tc.toolName,
       input: tc.args as Record<string, unknown>,
-      output: tc.output || "{}",
+      output: tc.output || '{}',
       timestamp: tc.timestamp || Date.now(),
     }));
 
@@ -2341,34 +2543,42 @@ async function scanSessionMessages(sessionID: string): Promise<SessionScanResult
     // Use projection for swarm detection (deterministic)
     if (projection.isSwarm) {
       result.swarmDetected = true;
-      result.reasons.push(`Swarm signature detected: epic ${projection.epic?.id || "unknown"} with ${projection.counts.total} subtasks`);
-      
+      result.reasons.push(
+        `Swarm signature detected: epic ${projection.epic?.id || 'unknown'} with ${projection.counts.total} subtasks`,
+      );
+
       if (isSwarmActive(projection)) {
-        result.reasons.push(`Swarm ACTIVE: ${projection.counts.spawned} spawned, ${projection.counts.inProgress} in_progress, ${projection.counts.completed} completed (not closed)`);
+        result.reasons.push(
+          `Swarm ACTIVE: ${projection.counts.spawned} spawned, ${projection.counts.inProgress} in_progress, ${projection.counts.completed} completed (not closed)`,
+        );
       } else {
-        result.reasons.push(`Swarm COMPLETE: all ${projection.counts.closed} subtasks closed`);
+        result.reasons.push(
+          `Swarm COMPLETE: all ${projection.counts.closed} subtasks closed`,
+        );
       }
     } else if (highConfidenceCount > 0) {
       // Fallback to heuristic detection if no signature but high-confidence tools found
       result.swarmDetected = true;
-      result.reasons.push(`${highConfidenceCount} high-confidence swarm tools (${Array.from(new Set(result.toolCalls.filter(tc => highConfidenceTools.has(tc.toolName)).map(tc => tc.toolName))).join(", ")})`);
+      result.reasons.push(
+        `${highConfidenceCount} high-confidence swarm tools (${Array.from(new Set(result.toolCalls.filter((tc) => highConfidenceTools.has(tc.toolName)).map((tc) => tc.toolName))).join(', ')})`,
+      );
     } else if (swarmToolCount > 0) {
       result.swarmDetected = true;
       result.reasons.push(`${swarmToolCount} swarm-related tools used`);
     }
 
     const totalDuration = Date.now() - startTime;
-    
+
     // Debug: log part type distribution to understand message structure
-    logCompaction("debug", "session_scan_part_types", {
+    logCompaction('debug', 'session_scan_part_types', {
       session_id: sessionID,
       messages_with_parts: messagesWithParts,
       messages_without_parts: messagesWithoutParts,
       part_type_counts: partTypeCounts,
       sample_part_types: samplePartTypes,
     });
-    
-    logCompaction("info", "session_scan_complete", {
+
+    logCompaction('info', 'session_scan_complete', {
       session_id: sessionID,
       duration_ms: totalDuration,
       message_count: result.messageCount,
@@ -2377,21 +2587,25 @@ async function scanSessionMessages(sessionID: string): Promise<SessionScanResult
       high_confidence_count: highConfidenceCount,
       swarm_detected: result.swarmDetected,
       reasons: result.reasons,
-      unique_tools: Array.from(new Set(result.toolCalls.map(tc => tc.toolName))),
+      unique_tools: Array.from(
+        new Set(result.toolCalls.map((tc) => tc.toolName)),
+      ),
       // Add projection summary
-      projection_summary: projection.isSwarm ? {
-        epic_id: projection.epic?.id,
-        epic_title: projection.epic?.title,
-        epic_status: projection.epic?.status,
-        is_active: isSwarmActive(projection),
-        counts: projection.counts,
-      } : null,
+      projection_summary: projection.isSwarm
+        ? {
+            epic_id: projection.epic?.id,
+            epic_title: projection.epic?.title,
+            epic_status: projection.epic?.status,
+            is_active: isSwarmActive(projection),
+            counts: projection.counts,
+          }
+        : null,
     });
 
     return result;
   } catch (err) {
     const totalDuration = Date.now() - startTime;
-    logCompaction("error", "session_scan_exception", {
+    logCompaction('error', 'session_scan_exception', {
       session_id: sessionID,
       error: err instanceof Error ? err.message : String(err),
       stack: err instanceof Error ? err.stack : undefined,
@@ -2420,36 +2634,38 @@ async function detectSwarm(): Promise<SwarmDetection> {
   let mediumConfidence = false;
   let lowConfidence = false;
 
-  logCompaction("debug", "detect_swarm_start", {
+  logCompaction('debug', 'detect_swarm_start', {
     project_directory: projectDirectory,
     cwd: process.cwd(),
   });
 
   try {
     const cliStart = Date.now();
-    const result = await new Promise<{ exitCode: number; stdout: string; stderr: string }>(
-      (resolve) => {
-        // Use swarm tool to query beads
-        const proc = spawn(SWARM_CLI, ["tool", "hive_query"], {
-          cwd: projectDirectory,
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-        let stdout = "";
-        let stderr = "";
-        proc.stdout.on("data", (d) => {
-          stdout += d;
-        });
-        proc.stderr.on("data", (d) => {
-          stderr += d;
-        });
-        proc.on("close", (exitCode) =>
-          resolve({ exitCode: exitCode ?? 1, stdout, stderr }),
-        );
-      },
-    );
+    const result = await new Promise<{
+      exitCode: number;
+      stdout: string;
+      stderr: string;
+    }>((resolve) => {
+      // Use swarm tool to query beads
+      const proc = spawn(SWARM_CLI, ['tool', 'hive_query'], {
+        cwd: projectDirectory,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let stdout = '';
+      let stderr = '';
+      proc.stdout.on('data', (d) => {
+        stdout += d;
+      });
+      proc.stderr.on('data', (d) => {
+        stderr += d;
+      });
+      proc.on('close', (exitCode) =>
+        resolve({ exitCode: exitCode ?? 1, stdout, stderr }),
+      );
+    });
     const cliDuration = Date.now() - cliStart;
 
-    logCompaction("debug", "detect_swarm_cli_complete", {
+    logCompaction('debug', 'detect_swarm_cli_complete', {
       duration_ms: cliDuration,
       exit_code: result.exitCode,
       stdout_length: result.stdout.length,
@@ -2458,34 +2674,46 @@ async function detectSwarm(): Promise<SwarmDetection> {
     });
 
     if (result.exitCode !== 0) {
-      logCompaction("warn", "detect_swarm_cli_failed", {
+      logCompaction('warn', 'detect_swarm_cli_failed', {
         exit_code: result.exitCode,
         stderr: result.stderr,
       });
-      return { detected: false, confidence: "none", reasons: ["hive_query failed"] };
+      return {
+        detected: false,
+        confidence: 'none',
+        reasons: ['hive_query failed'],
+      };
     }
 
     let cells: any[];
     try {
       cells = JSON.parse(result.stdout);
     } catch (parseErr) {
-      logCompaction("error", "detect_swarm_parse_failed", {
+      logCompaction('error', 'detect_swarm_parse_failed', {
         error: parseErr instanceof Error ? parseErr.message : String(parseErr),
         stdout_preview: result.stdout.substring(0, 500),
       });
-      return { detected: false, confidence: "none", reasons: ["hive_query parse failed"] };
+      return {
+        detected: false,
+        confidence: 'none',
+        reasons: ['hive_query parse failed'],
+      };
     }
 
     if (!Array.isArray(cells) || cells.length === 0) {
-      logCompaction("debug", "detect_swarm_no_cells", {
+      logCompaction('debug', 'detect_swarm_no_cells', {
         is_array: Array.isArray(cells),
         length: cells?.length ?? 0,
       });
-      return { detected: false, confidence: "none", reasons: ["no cells found"] };
+      return {
+        detected: false,
+        confidence: 'none',
+        reasons: ['no cells found'],
+      };
     }
 
     // Log ALL cells for debugging
-    logCompaction("debug", "detect_swarm_cells_found", {
+    logCompaction('debug', 'detect_swarm_cells_found', {
       total_cells: cells.length,
       cells: cells.map((c: any) => ({
         id: c.id,
@@ -2500,12 +2728,12 @@ async function detectSwarm(): Promise<SwarmDetection> {
 
     // HIGH: Any in_progress cells
     const inProgress = cells.filter(
-      (c: { status: string }) => c.status === "in_progress"
+      (c: { status: string }) => c.status === 'in_progress',
     );
     if (inProgress.length > 0) {
       highConfidence = true;
       reasons.push(`${inProgress.length} cells in_progress`);
-      logCompaction("debug", "detect_swarm_in_progress", {
+      logCompaction('debug', 'detect_swarm_in_progress', {
         count: inProgress.length,
         cells: inProgress.map((c: any) => ({ id: c.id, title: c.title })),
       });
@@ -2514,45 +2742,53 @@ async function detectSwarm(): Promise<SwarmDetection> {
     // MEDIUM: Open subtasks (cells with parent_id)
     const subtasks = cells.filter(
       (c: { status: string; parent_id?: string }) =>
-        c.status === "open" && c.parent_id
+        c.status === 'open' && c.parent_id,
     );
     if (subtasks.length > 0) {
       mediumConfidence = true;
       reasons.push(`${subtasks.length} open subtasks`);
-      logCompaction("debug", "detect_swarm_open_subtasks", {
+      logCompaction('debug', 'detect_swarm_open_subtasks', {
         count: subtasks.length,
-        cells: subtasks.map((c: any) => ({ id: c.id, title: c.title, parent_id: c.parent_id })),
+        cells: subtasks.map((c: any) => ({
+          id: c.id,
+          title: c.title,
+          parent_id: c.parent_id,
+        })),
       });
     }
 
     // MEDIUM: Unclosed epics
     const openEpics = cells.filter(
       (c: { status: string; type?: string }) =>
-        c.type === "epic" && c.status !== "closed"
+        c.type === 'epic' && c.status !== 'closed',
     );
     if (openEpics.length > 0) {
       mediumConfidence = true;
       reasons.push(`${openEpics.length} unclosed epics`);
-      logCompaction("debug", "detect_swarm_open_epics", {
+      logCompaction('debug', 'detect_swarm_open_epics', {
         count: openEpics.length,
-        cells: openEpics.map((c: any) => ({ id: c.id, title: c.title, status: c.status })),
+        cells: openEpics.map((c: any) => ({
+          id: c.id,
+          title: c.title,
+          status: c.status,
+        })),
       });
     }
 
     // MEDIUM: Recently updated cells (last hour)
     const oneHourAgo = Date.now() - 60 * 60 * 1000;
     const recentCells = cells.filter(
-      (c: { updated_at?: number }) => c.updated_at && c.updated_at > oneHourAgo
+      (c: { updated_at?: number }) => c.updated_at && c.updated_at > oneHourAgo,
     );
     if (recentCells.length > 0) {
       mediumConfidence = true;
       reasons.push(`${recentCells.length} cells updated in last hour`);
-      logCompaction("debug", "detect_swarm_recent_cells", {
+      logCompaction('debug', 'detect_swarm_recent_cells', {
         count: recentCells.length,
         one_hour_ago: oneHourAgo,
-        cells: recentCells.map((c: any) => ({ 
-          id: c.id, 
-          title: c.title, 
+        cells: recentCells.map((c: any) => ({
+          id: c.id,
+          title: c.title,
           updated_at: c.updated_at,
           age_minutes: Math.round((Date.now() - c.updated_at) / 60000),
         })),
@@ -2567,30 +2803,30 @@ async function detectSwarm(): Promise<SwarmDetection> {
   } catch (err) {
     // Detection failed, use fallback
     lowConfidence = true;
-    reasons.push("Detection error, using fallback");
-    logCompaction("error", "detect_swarm_exception", {
+    reasons.push('Detection error, using fallback');
+    logCompaction('error', 'detect_swarm_exception', {
       error: err instanceof Error ? err.message : String(err),
       stack: err instanceof Error ? err.stack : undefined,
     });
   }
 
   // Determine overall confidence
-  let confidence: "high" | "medium" | "low" | "none";
+  let confidence: 'high' | 'medium' | 'low' | 'none';
   if (highConfidence) {
-    confidence = "high";
+    confidence = 'high';
   } else if (mediumConfidence) {
-    confidence = "medium";
+    confidence = 'medium';
   } else if (lowConfidence) {
-    confidence = "low";
+    confidence = 'low';
   } else {
-    confidence = "none";
+    confidence = 'none';
   }
 
   const totalDuration = Date.now() - startTime;
-  logCompaction("debug", "detect_swarm_complete", {
+  logCompaction('debug', 'detect_swarm_complete', {
     duration_ms: totalDuration,
     confidence,
-    detected: confidence !== "none",
+    detected: confidence !== 'none',
     reason_count: reasons.length,
     reasons,
     high_confidence: highConfidence,
@@ -2599,7 +2835,7 @@ async function detectSwarm(): Promise<SwarmDetection> {
   });
 
   return {
-    detected: confidence !== "none",
+    detected: confidence !== 'none',
     confidence,
     reasons,
   };
@@ -2672,98 +2908,110 @@ Extract from session context:
 
 /**
  * Build dynamic swarm state section from snapshot
- * 
+ *
  * This creates a concrete state summary with actual IDs and status
  * to prepend to the static compaction context.
  */
 function buildDynamicStateFromSnapshot(snapshot: SwarmStateSnapshot): string {
   if (!snapshot.epic) {
-    return "";
+    return '';
   }
 
   const parts: string[] = [];
-  
+
   // Header with epic info
   parts.push(`## 🐝 Current Swarm State\n`);
   parts.push(`**Epic:** ${snapshot.epic.id} - ${snapshot.epic.title}`);
   parts.push(`**Status:** ${snapshot.epic.status}`);
   parts.push(`**Project:** ${projectDirectory}\n`);
-  
+
   // Subtask breakdown
   const subtasks = snapshot.epic.subtasks || [];
-  const completed = subtasks.filter(s => s.status === "closed");
-  const inProgress = subtasks.filter(s => s.status === "in_progress");
-  const blocked = subtasks.filter(s => s.status === "blocked");
-  const pending = subtasks.filter(s => s.status === "open");
-  
-  parts.push(`**Progress:** ${completed.length}/${subtasks.length} subtasks complete\n`);
-  
+  const completed = subtasks.filter((s) => s.status === 'closed');
+  const inProgress = subtasks.filter((s) => s.status === 'in_progress');
+  const blocked = subtasks.filter((s) => s.status === 'blocked');
+  const pending = subtasks.filter((s) => s.status === 'open');
+
+  parts.push(
+    `**Progress:** ${completed.length}/${subtasks.length} subtasks complete\n`,
+  );
+
   // Immediate actions with real IDs
   parts.push(`## 1️⃣ IMMEDIATE ACTIONS (Do These FIRST)\n`);
-  parts.push(`1. \`swarm_status(epic_id="${snapshot.epic.id}", project_key="${projectDirectory}")\` - Get current state`);
+  parts.push(
+    `1. \`swarm_status(epic_id="${snapshot.epic.id}", project_key="${projectDirectory}")\` - Get current state`,
+  );
   parts.push(`2. \`swarmmail_inbox(limit=5)\` - Check for worker messages`);
-  
+
   if (inProgress.length > 0) {
     parts.push(`3. Review in-progress work when workers complete`);
   }
   if (pending.length > 0) {
     const next = pending[0];
-    parts.push(`4. Spawn next subtask: \`swarm_spawn_subtask(bead_id="${next.id}", ...)\``);
+    parts.push(
+      `4. Spawn next subtask: \`swarm_spawn_subtask(bead_id="${next.id}", ...)\``,
+    );
   }
   if (blocked.length > 0) {
-    parts.push(`5. Unblock: ${blocked.map(s => s.id).join(", ")}`);
+    parts.push(`5. Unblock: ${blocked.map((s) => s.id).join(', ')}`);
   }
-  parts.push("");
-  
+  parts.push('');
+
   // Detailed subtask status
   if (inProgress.length > 0) {
     parts.push(`### 🚧 In Progress (${inProgress.length})`);
     for (const s of inProgress) {
-      const files = s.files?.length ? ` (${s.files.slice(0, 3).join(", ")}${s.files.length > 3 ? "..." : ""})` : "";
+      const files = s.files?.length
+        ? ` (${s.files.slice(0, 3).join(', ')}${s.files.length > 3 ? '...' : ''})`
+        : '';
       parts.push(`- ${s.id}: ${s.title}${files}`);
     }
-    parts.push("");
+    parts.push('');
   }
-  
+
   if (blocked.length > 0) {
     parts.push(`### 🚫 Blocked (${blocked.length})`);
     for (const s of blocked) {
       parts.push(`- ${s.id}: ${s.title}`);
     }
-    parts.push("");
+    parts.push('');
   }
-  
+
   if (pending.length > 0) {
     parts.push(`### ⏳ Ready to Spawn (${pending.length})`);
-    for (const s of pending.slice(0, 5)) { // Show first 5
-      const files = s.files?.length ? ` (${s.files.slice(0, 2).join(", ")}${s.files.length > 2 ? "..." : ""})` : "";
+    for (const s of pending.slice(0, 5)) {
+      // Show first 5
+      const files = s.files?.length
+        ? ` (${s.files.slice(0, 2).join(', ')}${s.files.length > 2 ? '...' : ''})`
+        : '';
       parts.push(`- ${s.id}: ${s.title}${files}`);
     }
     if (pending.length > 5) {
       parts.push(`- ... and ${pending.length - 5} more`);
     }
-    parts.push("");
+    parts.push('');
   }
-  
+
   if (completed.length > 0) {
     parts.push(`### ✅ Completed (${completed.length})`);
-    for (const s of completed.slice(-3)) { // Show last 3
+    for (const s of completed.slice(-3)) {
+      // Show last 3
       parts.push(`- ${s.id}: ${s.title} ✓`);
     }
     if (completed.length > 3) {
       parts.push(`- ... and ${completed.length - 3} more`);
     }
-    parts.push("");
+    parts.push('');
   }
-  
-  parts.push("---\n");
-  
-  return parts.join("\n");
+
+  parts.push('---\n');
+
+  return parts.join('\n');
 }
 
 /**
  * Fallback detection prompt - tells the compactor what to look for
- * 
+ *
  * Used when we can't definitively detect a swarm but want to be safe.
  * The compactor can check the conversation context for these patterns.
  */
@@ -2809,7 +3057,7 @@ type CompactionOutput = {
 };
 
 type ExtendedHooks = Hooks & {
-  "experimental.session.compacting"?: (
+  'experimental.session.compacting'?: (
     input: { sessionID: string },
     output: CompactionOutput,
   ) => Promise<void>;
@@ -2823,10 +3071,10 @@ const SwarmPlugin: Plugin = async (
   // CRITICAL: Set project directory from OpenCode input
   // Without this, CLI uses wrong database path
   projectDirectory = input.directory;
-  
+
   // Store SDK client for session message scanning during compaction
   sdkClient = input.client;
-  
+
   return {
     tool: {
       // Beads
@@ -2919,23 +3167,23 @@ const SwarmPlugin: Plugin = async (
 
     // Swarm-aware compaction hook with LLM-powered continuation prompts
     // Three-level fallback chain: LLM → static context → detection fallback → none
-    "experimental.session.compacting": async (
+    'experimental.session.compacting': async (
       input: { sessionID: string },
       output: CompactionOutput,
     ) => {
       const startTime = Date.now();
-      
+
       // =======================================================================
       // LOG: Compaction hook invoked - capture EVERYTHING we receive
       // =======================================================================
-      logCompaction("info", "compaction_hook_invoked", {
+      logCompaction('info', 'compaction_hook_invoked', {
         session_id: input.sessionID,
         project_directory: projectDirectory,
         input_keys: Object.keys(input),
         input_full: JSON.parse(JSON.stringify(input)), // Deep clone for logging
         output_keys: Object.keys(output),
         output_context_count: output.context?.length ?? 0,
-        output_has_prompt_field: "prompt" in output,
+        output_has_prompt_field: 'prompt' in output,
         output_initial_state: {
           context: output.context,
           prompt: (output as any).prompt,
@@ -2958,7 +3206,7 @@ const SwarmPlugin: Plugin = async (
       const sessionScan = await scanSessionMessages(input.sessionID);
       const sessionScanDuration = Date.now() - sessionScanStart;
 
-      logCompaction("info", "session_scan_results", {
+      logCompaction('info', 'session_scan_results', {
         session_id: input.sessionID,
         duration_ms: sessionScanDuration,
         message_count: sessionScan.messageCount,
@@ -2974,7 +3222,7 @@ const SwarmPlugin: Plugin = async (
       const detection = await detectSwarm();
       const detectionDuration = Date.now() - detectionStart;
 
-      logCompaction("info", "swarm_detection_complete", {
+      logCompaction('info', 'swarm_detection_complete', {
         session_id: input.sessionID,
         duration_ms: detectionDuration,
         detected: detection.detected,
@@ -2987,46 +3235,49 @@ const SwarmPlugin: Plugin = async (
       // STEP 3: Merge session scan with hive detection for final confidence
       // =======================================================================
       // If session messages show high-confidence swarm tools, boost confidence
-      if (sessionScan.swarmDetected && sessionScan.reasons.some(r => r.includes("high-confidence"))) {
-        if (detection.confidence === "none" || detection.confidence === "low") {
-          detection.confidence = "high";
+      if (
+        sessionScan.swarmDetected &&
+        sessionScan.reasons.some((r) => r.includes('high-confidence'))
+      ) {
+        if (detection.confidence === 'none' || detection.confidence === 'low') {
+          detection.confidence = 'high';
           detection.detected = true;
           detection.reasons.push(...sessionScan.reasons);
-          
-          logCompaction("info", "confidence_boost_from_session_scan", {
+
+          logCompaction('info', 'confidence_boost_from_session_scan', {
             session_id: input.sessionID,
             original_confidence: detection.confidence,
-            boosted_to: "high",
+            boosted_to: 'high',
             session_reasons: sessionScan.reasons,
           });
         }
       } else if (sessionScan.swarmDetected) {
         // Medium boost for any swarm tools found
-        if (detection.confidence === "none") {
-          detection.confidence = "medium";
+        if (detection.confidence === 'none') {
+          detection.confidence = 'medium';
           detection.detected = true;
           detection.reasons.push(...sessionScan.reasons);
 
-          logCompaction("info", "confidence_boost_from_session_scan", {
+          logCompaction('info', 'confidence_boost_from_session_scan', {
             session_id: input.sessionID,
-            original_confidence: "none",
-            boosted_to: "medium",
+            original_confidence: 'none',
+            boosted_to: 'medium',
             session_reasons: sessionScan.reasons,
           });
-        } else if (detection.confidence === "low") {
-          detection.confidence = "medium";
+        } else if (detection.confidence === 'low') {
+          detection.confidence = 'medium';
           detection.reasons.push(...sessionScan.reasons);
 
-          logCompaction("info", "confidence_boost_from_session_scan", {
+          logCompaction('info', 'confidence_boost_from_session_scan', {
             session_id: input.sessionID,
-            original_confidence: "low",
-            boosted_to: "medium",
+            original_confidence: 'low',
+            boosted_to: 'medium',
             session_reasons: sessionScan.reasons,
           });
         }
       }
 
-      logCompaction("info", "final_swarm_detection", {
+      logCompaction('info', 'final_swarm_detection', {
         session_id: input.sessionID,
         confidence: detection.confidence,
         detected: detection.detected,
@@ -3034,9 +3285,12 @@ const SwarmPlugin: Plugin = async (
         message_scan_contributed: sessionScan.swarmDetected,
       });
 
-      if (detection.confidence === "high" || detection.confidence === "medium") {
+      if (
+        detection.confidence === 'high' ||
+        detection.confidence === 'medium'
+      ) {
         // Definite or probable swarm - try LLM-powered compaction
-        logCompaction("info", "swarm_detected_attempting_llm", {
+        logCompaction('info', 'swarm_detected_attempting_llm', {
           session_id: input.sessionID,
           confidence: detection.confidence,
           reasons: detection.reasons,
@@ -3046,39 +3300,45 @@ const SwarmPlugin: Plugin = async (
         // Hoist snapshot and queryDuration outside try block so they're available in fallback path
         let snapshot: SwarmStateSnapshot | undefined;
         let queryDuration = 0; // 0 if using projection, actual duration if using hive query
-        
+
         try {
           // =======================================================================
           // PREFER PROJECTION (ground truth from events) OVER HIVE QUERY
           // =======================================================================
           // The projection is derived from session events - it's the source of truth.
           // Hive query may show all cells closed even if swarm was active.
-          
+
           if (sessionScan.projection?.isSwarm) {
             // Use projection as primary source - convert to snapshot format
             const proj = sessionScan.projection;
             snapshot = {
               sessionID: input.sessionID,
               detection: {
-                confidence: isSwarmActive(proj) ? "high" : "medium",
+                confidence: isSwarmActive(proj) ? 'high' : 'medium',
                 reasons: sessionScan.reasons,
               },
-              epic: proj.epic ? {
-                id: proj.epic.id,
-                title: proj.epic.title,
-                status: proj.epic.status,
-                subtasks: Array.from(proj.subtasks.values()).map(s => ({
-                  id: s.id,
-                  title: s.title,
-                  status: s.status as "open" | "in_progress" | "blocked" | "closed",
-                  files: s.files,
-                })),
-              } : undefined,
+              epic: proj.epic
+                ? {
+                    id: proj.epic.id,
+                    title: proj.epic.title,
+                    status: proj.epic.status,
+                    subtasks: Array.from(proj.subtasks.values()).map((s) => ({
+                      id: s.id,
+                      title: s.title,
+                      status: s.status as
+                        | 'open'
+                        | 'in_progress'
+                        | 'blocked'
+                        | 'closed',
+                      files: s.files,
+                    })),
+                  }
+                : undefined,
               messages: [],
               reservations: [],
             };
-            
-            logCompaction("info", "using_projection_as_snapshot", {
+
+            logCompaction('info', 'using_projection_as_snapshot', {
               session_id: input.sessionID,
               epic_id: proj.epic?.id,
               epic_title: proj.epic?.title,
@@ -3091,23 +3351,25 @@ const SwarmPlugin: Plugin = async (
             const queryStart = Date.now();
             snapshot = await querySwarmState(input.sessionID);
             queryDuration = Date.now() - queryStart;
-            
-            logCompaction("info", "fallback_to_hive_query", {
+
+            logCompaction('info', 'fallback_to_hive_query', {
               session_id: input.sessionID,
               duration_ms: queryDuration,
-              reason: "no projection available or not a swarm",
+              reason: 'no projection available or not a swarm',
             });
           }
 
-          logCompaction("info", "swarm_state_resolved", {
+          logCompaction('info', 'swarm_state_resolved', {
             session_id: input.sessionID,
-            source: sessionScan.projection?.isSwarm ? "projection" : "hive_query",
+            source: sessionScan.projection?.isSwarm
+              ? 'projection'
+              : 'hive_query',
             has_epic: !!snapshot.epic,
             epic_id: snapshot.epic?.id,
             epic_title: snapshot.epic?.title,
             epic_status: snapshot.epic?.status,
             subtask_count: snapshot.epic?.subtasks?.length ?? 0,
-            subtasks: snapshot.epic?.subtasks?.map(s => ({
+            subtasks: snapshot.epic?.subtasks?.map((s) => ({
               id: s.id,
               title: s.title,
               status: s.status,
@@ -3124,8 +3386,8 @@ const SwarmPlugin: Plugin = async (
           // =======================================================================
           await captureCompaction(
             input.sessionID,
-            snapshot.epic?.id || "unknown",
-            "detection_complete",
+            snapshot.epic?.id || 'unknown',
+            'detection_complete',
             {
               confidence: snapshot.detection.confidence,
               detected: detection.detected,
@@ -3143,7 +3405,7 @@ const SwarmPlugin: Plugin = async (
           const llmPrompt = await generateCompactionPrompt(snapshot);
           const llmDuration = Date.now() - llmStart;
 
-          logCompaction("info", "llm_generation_complete", {
+          logCompaction('info', 'llm_generation_complete', {
             session_id: input.sessionID,
             duration_ms: llmDuration,
             success: !!llmPrompt,
@@ -3157,12 +3419,12 @@ const SwarmPlugin: Plugin = async (
           if (llmPrompt) {
             await captureCompaction(
               input.sessionID,
-              snapshot.epic?.id || "unknown",
-              "prompt_generated",
+              snapshot.epic?.id || 'unknown',
+              'prompt_generated',
               {
                 prompt_length: llmPrompt.length,
                 full_prompt: llmPrompt, // FULL content, not truncated
-                context_type: "llm_generated",
+                context_type: 'llm_generated',
                 duration_ms: llmDuration,
               },
             );
@@ -3170,23 +3432,23 @@ const SwarmPlugin: Plugin = async (
 
           if (llmPrompt) {
             // SUCCESS: Use LLM-generated prompt
-            const header = `[Swarm compaction: LLM-generated, ${detection.reasons.join(", ")}]\n\n`;
+            const header = `[Swarm compaction: LLM-generated, ${detection.reasons.join(', ')}]\n\n`;
             const fullContent = header + llmPrompt;
 
             // Progressive enhancement: use new API if available
-            if ("prompt" in output) {
+            if ('prompt' in output) {
               output.prompt = fullContent;
-              logCompaction("info", "context_injected_via_prompt_api", {
+              logCompaction('info', 'context_injected_via_prompt_api', {
                 session_id: input.sessionID,
                 content_length: fullContent.length,
-                method: "output.prompt",
+                method: 'output.prompt',
               });
             } else {
               output.context.push(fullContent);
-              logCompaction("info", "context_injected_via_context_array", {
+              logCompaction('info', 'context_injected_via_context_array', {
                 session_id: input.sessionID,
                 content_length: fullContent.length,
-                method: "output.context.push",
+                method: 'output.context.push',
                 context_count_after: output.context.length,
               });
             }
@@ -3196,50 +3458,51 @@ const SwarmPlugin: Plugin = async (
             // =======================================================================
             await captureCompaction(
               input.sessionID,
-              snapshot.epic?.id || "unknown",
-              "context_injected",
+              snapshot.epic?.id || 'unknown',
+              'context_injected',
               {
                 full_content: fullContent, // FULL content, not truncated
                 content_length: fullContent.length,
-                injection_method: "prompt" in output ? "output.prompt" : "output.context.push",
-                context_type: "llm_generated",
+                injection_method:
+                  'prompt' in output ? 'output.prompt' : 'output.context.push',
+                context_type: 'llm_generated',
               },
             );
 
             const totalDuration = Date.now() - startTime;
-            logCompaction("info", "compaction_complete_llm_success", {
+            logCompaction('info', 'compaction_complete_llm_success', {
               session_id: input.sessionID,
               total_duration_ms: totalDuration,
               detection_duration_ms: detectionDuration,
               query_duration_ms: queryDuration,
               llm_duration_ms: llmDuration,
               confidence: detection.confidence,
-              context_type: "llm_generated",
+              context_type: 'llm_generated',
               content_length: fullContent.length,
             });
             return;
           }
 
           // LLM failed, fall through to static prompt
-          logCompaction("warn", "llm_generation_returned_null", {
+          logCompaction('warn', 'llm_generation_returned_null', {
             session_id: input.sessionID,
             llm_duration_ms: llmDuration,
-            falling_back_to: "static_prompt",
+            falling_back_to: 'static_prompt',
           });
         } catch (err) {
           // LLM failed, fall through to static prompt
-          logCompaction("error", "llm_generation_failed", {
+          logCompaction('error', 'llm_generation_failed', {
             session_id: input.sessionID,
             error: err instanceof Error ? err.message : String(err),
             error_stack: err instanceof Error ? err.stack : undefined,
-            falling_back_to: "static_prompt",
+            falling_back_to: 'static_prompt',
           });
         }
 
         // Guard: Don't double-inject if LLM prompt was already set
         // This can happen if the error occurred after setting output.prompt but before return
-        if ("prompt" in output && output.prompt) {
-          logCompaction("info", "skipping_static_fallback_prompt_already_set", {
+        if ('prompt' in output && output.prompt) {
+          logCompaction('info', 'skipping_static_fallback_prompt_already_set', {
             session_id: input.sessionID,
             prompt_length: output.prompt.length,
           });
@@ -3247,10 +3510,12 @@ const SwarmPlugin: Plugin = async (
         }
 
         // Level 3: Fall back to static context WITH dynamic state from snapshot
-        const header = `[Swarm detected: ${detection.reasons.join(", ")}]\n\n`;
-        
+        const header = `[Swarm detected: ${detection.reasons.join(', ')}]\n\n`;
+
         // Build dynamic state section if we have snapshot data
-        const dynamicState = snapshot ? buildDynamicStateFromSnapshot(snapshot) : "";
+        const dynamicState = snapshot
+          ? buildDynamicStateFromSnapshot(snapshot)
+          : '';
         const staticContent = header + dynamicState + SWARM_COMPACTION_CONTEXT;
         output.context.push(staticContent);
 
@@ -3259,13 +3524,13 @@ const SwarmPlugin: Plugin = async (
         // =======================================================================
         await captureCompaction(
           input.sessionID,
-          snapshot?.epic?.id || "unknown",
-          "context_injected",
+          snapshot?.epic?.id || 'unknown',
+          'context_injected',
           {
             full_content: staticContent,
             content_length: staticContent.length,
-            injection_method: "output.context.push",
-            context_type: "static_with_dynamic_state",
+            injection_method: 'output.context.push',
+            context_type: 'static_with_dynamic_state',
             has_dynamic_state: !!dynamicState,
             epic_id: snapshot?.epic?.id,
             subtask_count: snapshot?.epic?.subtasks?.length ?? 0,
@@ -3273,20 +3538,22 @@ const SwarmPlugin: Plugin = async (
         );
 
         const totalDuration = Date.now() - startTime;
-        logCompaction("info", "compaction_complete_static_fallback", {
+        logCompaction('info', 'compaction_complete_static_fallback', {
           session_id: input.sessionID,
           total_duration_ms: totalDuration,
           confidence: detection.confidence,
-          context_type: dynamicState ? "static_with_dynamic_state" : "static_swarm_context",
+          context_type: dynamicState
+            ? 'static_with_dynamic_state'
+            : 'static_swarm_context',
           content_length: staticContent.length,
           context_count_after: output.context.length,
           has_dynamic_state: !!dynamicState,
           epic_id: snapshot?.epic?.id,
           subtask_count: snapshot?.epic?.subtasks?.length ?? 0,
         });
-      } else if (detection.confidence === "low") {
+      } else if (detection.confidence === 'low') {
         // Level 4: Possible swarm - inject fallback detection prompt
-        const header = `[Possible swarm: ${detection.reasons.join(", ")}]\n\n`;
+        const header = `[Possible swarm: ${detection.reasons.join(', ')}]\n\n`;
         const fallbackContent = header + SWARM_DETECTION_FALLBACK;
         output.context.push(fallbackContent);
 
@@ -3295,22 +3562,22 @@ const SwarmPlugin: Plugin = async (
         // =======================================================================
         await captureCompaction(
           input.sessionID,
-          "unknown", // No snapshot for low confidence
-          "context_injected",
+          'unknown', // No snapshot for low confidence
+          'context_injected',
           {
             full_content: fallbackContent,
             content_length: fallbackContent.length,
-            injection_method: "output.context.push",
-            context_type: "detection_fallback",
+            injection_method: 'output.context.push',
+            context_type: 'detection_fallback',
           },
         );
 
         const totalDuration = Date.now() - startTime;
-        logCompaction("info", "compaction_complete_detection_fallback", {
+        logCompaction('info', 'compaction_complete_detection_fallback', {
           session_id: input.sessionID,
           total_duration_ms: totalDuration,
           confidence: detection.confidence,
-          context_type: "detection_fallback",
+          context_type: 'detection_fallback',
           content_length: fallbackContent.length,
           context_count_after: output.context.length,
           reasons: detection.reasons,
@@ -3318,11 +3585,11 @@ const SwarmPlugin: Plugin = async (
       } else {
         // Level 5: confidence === "none" - no injection, probably not a swarm
         const totalDuration = Date.now() - startTime;
-        logCompaction("info", "compaction_complete_no_swarm", {
+        logCompaction('info', 'compaction_complete_no_swarm', {
           session_id: input.sessionID,
           total_duration_ms: totalDuration,
           confidence: detection.confidence,
-          context_type: "none",
+          context_type: 'none',
           reasons: detection.reasons,
           context_count_unchanged: output.context.length,
         });
@@ -3331,10 +3598,10 @@ const SwarmPlugin: Plugin = async (
       // =======================================================================
       // LOG: Final output state
       // =======================================================================
-      logCompaction("debug", "compaction_hook_complete_final_state", {
+      logCompaction('debug', 'compaction_hook_complete_final_state', {
         session_id: input.sessionID,
         output_context_count: output.context?.length ?? 0,
-        output_context_lengths: output.context?.map(c => c.length) ?? [],
+        output_context_lengths: output.context?.map((c) => c.length) ?? [],
         output_has_prompt: !!(output as any).prompt,
         output_prompt_length: (output as any).prompt?.length ?? 0,
         total_duration_ms: Date.now() - startTime,

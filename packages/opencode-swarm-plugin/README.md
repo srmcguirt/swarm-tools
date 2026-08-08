@@ -32,11 +32,11 @@ See [bun.sh](https://bun.sh) for other installation methods (Homebrew, npm, etc.
 ### 1. Install
 
 ```bash
-bun install -g opencode-swarm-plugin@latest
+bun add -g opencode-swarm-plugin@npm:@srmcguirt/opencode-swarm-plugin@latest
 swarm setup
 ```
 
-> **Note:** You can also use `npm install -g`, but Bun must be installed to run the CLI.
+> **Note:** You can also use `npm install -g opencode-swarm-plugin@npm:@srmcguirt/opencode-swarm-plugin@latest`, but Bun must be installed to run the CLI. Do not drop the `@npm:@srmcguirt/...` alias — the unscoped `opencode-swarm-plugin` name on npmjs is not ours.
 
 ### Claude Code Plugin (Marketplace)
 
@@ -56,7 +56,7 @@ Choose **Marketplace → opencode-swarm-plugin → Install**.
 **Global install (npm):**
 
 ```bash
-# After `npm install -g opencode-swarm-plugin`
+# After `bun add -g opencode-swarm-plugin@npm:@srmcguirt/opencode-swarm-plugin@latest`
 swarm claude install
 ```
 
