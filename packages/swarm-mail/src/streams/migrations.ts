@@ -279,7 +279,8 @@ export const migrations: Migration[] = [
   },
   {
     version: 5,
-    description: "Add project_key and checkpointed_at to swarm_contexts, change primary key",
+    description:
+      "Add project_key and checkpointed_at to swarm_contexts, change primary key",
     up: `
       -- Add new columns
       ALTER TABLE swarm_contexts ADD COLUMN IF NOT EXISTS project_key TEXT;
@@ -314,7 +315,8 @@ export const migrations: Migration[] = [
   },
   {
     version: 6,
-    description: "Add core event store tables (events, agents, messages, reservations)",
+    description:
+      "Add core event store tables (events, agents, messages, reservations)",
     up: `
       -- Events table: append-only event log
       CREATE TABLE IF NOT EXISTS events (
@@ -542,18 +544,22 @@ async function healMemorySchema(db: DatabaseAdapter): Promise<void> {
   try {
     // Check if memories table exists at all
     const tableCheck = await db.query<{ name: string }>(
-      `SELECT name FROM sqlite_master WHERE type='table' AND name='memories'`
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='memories'`,
     );
     if (tableCheck.rows.length === 0) return;
 
     // Get current columns
     const columnsResult = await db.query<{ name: string }>(
-      `SELECT name FROM pragma_table_info('memories')`
+      `SELECT name FROM pragma_table_info('memories')`,
     );
-    const existingColumns = new Set(columnsResult.rows.map(r => r.name));
+    const existingColumns = new Set(columnsResult.rows.map((r) => r.name));
 
     // Expected columns with their defaults (from db/schema/memory.ts)
-    const expectedColumns: Array<{ name: string; type: string; defaultVal: string }> = [
+    const expectedColumns: Array<{
+      name: string;
+      type: string;
+      defaultVal: string;
+    }> = [
       { name: "tags", type: "TEXT", defaultVal: "'[]'" },
       { name: "updated_at", type: "TEXT", defaultVal: "(datetime('now'))" },
       { name: "decay_factor", type: "REAL", defaultVal: "1.0" },
@@ -566,20 +572,23 @@ async function healMemorySchema(db: DatabaseAdapter): Promise<void> {
       { name: "superseded_by", type: "TEXT", defaultVal: "NULL" },
       { name: "auto_tags", type: "TEXT", defaultVal: "NULL" },
       { name: "keywords", type: "TEXT", defaultVal: "NULL" },
+      { name: "repo_key", type: "TEXT", defaultVal: "NULL" },
+      { name: "package_key", type: "TEXT", defaultVal: "NULL" },
     ];
 
     let healed = 0;
     for (const col of expectedColumns) {
       if (!existingColumns.has(col.name)) {
         try {
-          const defaultClause = col.defaultVal === "NULL"
-            ? ""
-            : ` DEFAULT ${col.defaultVal}`;
+          const defaultClause =
+            col.defaultVal === "NULL" ? "" : ` DEFAULT ${col.defaultVal}`;
           await db.exec(
-            `ALTER TABLE memories ADD COLUMN ${col.name} ${col.type}${defaultClause}`
+            `ALTER TABLE memories ADD COLUMN ${col.name} ${col.type}${defaultClause}`,
           );
           healed++;
-          console.log(`[migrations] healed: added missing column memories.${col.name}`);
+          console.log(
+            `[migrations] healed: added missing column memories.${col.name}`,
+          );
         } catch {
           // Column might have been added between our check and ALTER — that's fine
         }
@@ -587,11 +596,16 @@ async function healMemorySchema(db: DatabaseAdapter): Promise<void> {
     }
 
     if (healed > 0) {
-      console.log(`[migrations] self-heal: added ${healed} missing column(s) to memories table`);
+      console.log(
+        `[migrations] self-heal: added ${healed} missing column(s) to memories table`,
+      );
     }
   } catch (error) {
     // Self-heal is best-effort — don't crash the migration system
-    console.warn("[migrations] self-heal failed (non-fatal):", (error as Error).message);
+    console.warn(
+      "[migrations] self-heal failed (non-fatal):",
+      (error as Error).message,
+    );
   }
 }
 
@@ -673,7 +687,9 @@ export async function isMigrationApplied(
 /**
  * Get pending migrations (not yet applied)
  */
-export async function getPendingMigrations(db: DatabaseAdapter): Promise<Migration[]> {
+export async function getPendingMigrations(
+  db: DatabaseAdapter,
+): Promise<Migration[]> {
   const currentVersion = await getCurrentVersion(db);
   return migrations
     .filter((m) => m.version > currentVersion)

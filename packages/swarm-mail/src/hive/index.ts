@@ -80,7 +80,12 @@ export { createHiveAdapter } from "./adapter.js";
 export { createHiveAdapter as createBeadsAdapter } from "./adapter.js";
 
 // Migrations
-export { beadsMigration, beadsMigrations, cellsViewMigration, hiveMigrations } from "./migrations.js";
+export {
+  beadsMigration,
+  beadsMigrations,
+  cellsViewMigration,
+  hiveMigrations,
+} from "./migrations.js";
 
 // Store operations
 export {
@@ -152,6 +157,18 @@ export {
   type FlushManagerOptions,
   type FlushResult,
 } from "./flush-manager.js";
+
+// hive-data repo resolution (per-project JSONL mirrors, externalized)
+export {
+  resolveHiveDataRepoRoot,
+  assertHiveDataRepoReady,
+  assertHiveDataRepoNotMidMerge,
+  HiveDataRepoError,
+  normalizeGitRemoteUrl,
+  resolveHiveDataSlug,
+  hiveDataProjectDir,
+  type ResolveHiveDataRepoRootOptions,
+} from "./hive-data-repo.js";
 
 // 3-Way Merge Driver
 export {

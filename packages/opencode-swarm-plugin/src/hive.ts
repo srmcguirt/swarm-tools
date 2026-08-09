@@ -19,7 +19,13 @@ import {
   createHiveAdapter,
   FlushManager,
   importFromJSONL,
-  syncMemories,
+  syncProjectMemoriesToHiveData,
+  resolveHiveDataRepoRoot,
+  assertHiveDataRepoReady,
+  assertHiveDataRepoNotMidMerge,
+  HiveDataRepoError,
+  resolveHiveDataSlug,
+  hiveDataProjectDir,
   type HiveAdapter,
   type Cell as AdapterCell,
   getSwarmMailLibSQL,
@@ -27,8 +33,8 @@ import {
   findCellsByPartialId,
   listProjects,
 } from "swarm-mail";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, mkdirSync } from "node:fs";
+import { join, relative } from "node:path";
 
 // ============================================================================
 // Working Directory Configuration
@@ -64,12 +70,17 @@ export const setBeadsWorkingDirectory = setHiveWorkingDirectory;
 export const getBeadsWorkingDirectory = getHiveWorkingDirectory;
 
 /**
- * Run a git command in the correct working directory.
+ * Run a git command in an explicit working directory.
+ *
+ * `cwd` is required (not defaulted to getHiveWorkingDirectory()) because
+ * this function's one caller, hive_sync, must run its git operations
+ * against the hive-data repo root, not the working repo — passing it
+ * explicitly at every call site prevents that from silently regressing.
  */
 async function runGitCommand(
   args: string[],
+  cwd: string,
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-  const cwd = getHiveWorkingDirectory();
   const proc = Bun.spawn(["git", ...args], {
     cwd,
     stdout: "pipe",
@@ -166,79 +177,84 @@ export interface MigrationResult {
 
 /**
  * Check if .beads → .hive migration is needed
- * 
+ *
  * Migration is needed when:
  * - .beads directory exists
  * - .hive directory does NOT exist
- * 
+ *
  * @param projectPath - Absolute path to the project root
  * @returns MigrationCheckResult indicating if migration is needed
  */
-export function checkBeadsMigrationNeeded(projectPath: string): MigrationCheckResult {
+export function checkBeadsMigrationNeeded(
+  projectPath: string,
+): MigrationCheckResult {
   const beadsDir = join(projectPath, ".beads");
   const hiveDir = join(projectPath, ".hive");
-  
+
   // If .hive already exists, no migration needed
   if (existsSync(hiveDir)) {
     return { needed: false };
   }
-  
+
   // If .beads exists but .hive doesn't, migration is needed
   if (existsSync(beadsDir)) {
     return { needed: true, beadsPath: beadsDir };
   }
-  
+
   // Neither exists - no migration needed
   return { needed: false };
 }
 
 /**
  * Migrate .beads directory to .hive
- * 
+ *
  * This function renames .beads to .hive. It should only be called
  * after user confirmation via CLI prompt.
- * 
+ *
  * @param projectPath - Absolute path to the project root
  * @returns MigrationResult indicating success or skip reason
  */
-export async function migrateBeadsToHive(projectPath: string): Promise<MigrationResult> {
+export async function migrateBeadsToHive(
+  projectPath: string,
+): Promise<MigrationResult> {
   const beadsDir = join(projectPath, ".beads");
   const hiveDir = join(projectPath, ".hive");
-  
+
   // Check if .hive already exists - skip migration
   if (existsSync(hiveDir)) {
-    return { 
-      migrated: false, 
-      reason: ".hive directory already exists - skipping migration to avoid data loss" 
+    return {
+      migrated: false,
+      reason:
+        ".hive directory already exists - skipping migration to avoid data loss",
     };
   }
-  
+
   // Check if .beads exists
   if (!existsSync(beadsDir)) {
-    return { 
-      migrated: false, 
-      reason: ".beads directory not found - nothing to migrate" 
+    return {
+      migrated: false,
+      reason: ".beads directory not found - nothing to migrate",
     };
   }
-  
+
   // Perform the rename
   const { renameSync } = await import("node:fs");
   renameSync(beadsDir, hiveDir);
-  
+
   return { migrated: true };
 }
 
 /**
  * Ensure .hive directory exists
- * 
+ *
  * Creates .hive directory if it doesn't exist. This is idempotent
  * and safe to call multiple times.
- * 
+ *
  * @param projectPath - Absolute path to the project root
  */
 export function ensureHiveDirectory(projectPath: string): void {
   const hiveDir = join(projectPath, ".hive");
-  
+
   if (!existsSync(hiveDir)) {
     const { mkdirSync } = require("node:fs");
     mkdirSync(hiveDir, { recursive: true });
@@ -247,48 +263,56 @@ export function ensureHiveDirectory(projectPath: string): void {
 
 /**
  * Merge historic beads from beads.base.jsonl into issues.jsonl
- * 
+ *
  * This function reads beads.base.jsonl (historic data) and issues.jsonl (current data),
  * merges them by ID (issues.jsonl version wins for duplicates), and writes the result
  * back to issues.jsonl.
- * 
+ *
  * Use case: After migrating from .beads to .hive, you may have a beads.base.jsonl file
  * containing old beads that should be merged into the current issues.jsonl.
- * 
+ *
  * @param projectPath - Absolute path to the project root
  * @returns Object with merged and skipped counts
  */
-export async function mergeHistoricBeads(projectPath: string): Promise<{merged: number, skipped: number}> {
+export async function mergeHistoricBeads(
+  projectPath: string,
+): Promise<{ merged: number; skipped: number }> {
   const { readFileSync, writeFileSync, existsSync } = await import("node:fs");
   const hiveDir = join(projectPath, ".hive");
   const basePath = join(hiveDir, "beads.base.jsonl");
   const issuesPath = join(hiveDir, "issues.jsonl");
-  
+
   // If base file doesn't exist, nothing to merge
   if (!existsSync(basePath)) {
     return { merged: 0, skipped: 0 };
   }
-  
+
   // Read base file
   const baseContent = readFileSync(basePath, "utf-8");
-  const baseLines = baseContent.trim().split("\n").filter(l => l);
-  const baseBeads = baseLines.map(line => JSON.parse(line));
-  
+  const baseLines = baseContent
+    .trim()
+    .split("\n")
+    .filter((l) => l);
+  const baseBeads = baseLines.map((line) => JSON.parse(line));
+
   // Read issues file (or create empty if missing)
   let issuesBeads: any[] = [];
   if (existsSync(issuesPath)) {
     const issuesContent = readFileSync(issuesPath, "utf-8");
-    const issuesLines = issuesContent.trim().split("\n").filter(l => l);
-    issuesBeads = issuesLines.map(line => JSON.parse(line));
+    const issuesLines = issuesContent
+      .trim()
+      .split("\n")
+      .filter((l) => l);
+    issuesBeads = issuesLines.map((line) => JSON.parse(line));
   }
-  
+
   // Build set of existing IDs in issues.jsonl
-  const existingIds = new Set(issuesBeads.map(b => b.id));
-  
+  const existingIds = new Set(issuesBeads.map((b) => b.id));
+
   // Merge: add beads from base that aren't in issues
   let merged = 0;
   let skipped = 0;
-  
+
   for (const baseBead of baseBeads) {
     if (existingIds.has(baseBead.id)) {
       skipped++;
@@ -297,23 +321,24 @@ export async function mergeHistoricBeads(projectPath: string): Promise<{merged: 
       merged++;
     }
   }
-  
+
   // Write merged result back to issues.jsonl
-  const mergedContent = issuesBeads.map(b => JSON.stringify(b)).join("\n") + "\n";
+  const mergedContent =
+    issuesBeads.map((b) => JSON.stringify(b)).join("\n") + "\n";
   writeFileSync(issuesPath, mergedContent, "utf-8");
-  
+
   return { merged, skipped };
 }
 
 /**
  * Import cells from .hive/issues.jsonl into PGLite database
- * 
+ *
  * Reads the JSONL file and upserts each record into the cells table
  * using the HiveAdapter. Provides granular error reporting for invalid lines.
- * 
+ *
  * This function manually parses JSONL line-by-line to gracefully handle
  * invalid JSON without throwing. Each valid line is imported via the adapter.
- * 
+ *
  * @param projectPath - Absolute path to the project root
  * @returns Object with imported, updated, and error counts
  */
@@ -323,37 +348,37 @@ export async function importJsonlToPGLite(projectPath: string): Promise<{
   errors: number;
 }> {
   const jsonlPath = join(projectPath, ".hive", "issues.jsonl");
-  
+
   // Handle missing file gracefully
   if (!existsSync(jsonlPath)) {
     return { imported: 0, updated: 0, errors: 0 };
   }
-  
+
   // Read JSONL content
   const jsonlContent = readFileSync(jsonlPath, "utf-8");
-  
+
   // Handle empty file
   if (!jsonlContent || jsonlContent.trim() === "") {
     return { imported: 0, updated: 0, errors: 0 };
   }
-  
+
   // Get adapter - but we need to prevent auto-migration from running
   // Auto-migration only runs if DB is empty, so we check first
   const adapter = await getHiveAdapter(projectPath);
-  
+
   // Parse JSONL line-by-line, tolerating invalid JSON
-  const lines = jsonlContent.split("\n").filter(l => l.trim());
+  const lines = jsonlContent.split("\n").filter((l) => l.trim());
   let imported = 0;
   let updated = 0;
   let errors = 0;
-  
+
   for (const line of lines) {
     try {
       const cellData = JSON.parse(line);
-      
+
       // Check if cell exists
       const existing = await adapter.getCell(projectPath, cellData.id);
-      
+
       if (existing) {
         // Update existing cell
         try {
@@ -363,16 +388,24 @@ export async function importJsonlToPGLite(projectPath: string): Promise<{
             priority: cellData.priority,
             assignee: cellData.assignee,
           });
-          
+
           // Update status if needed - use closeCell for 'closed' status
           if (existing.status !== cellData.status) {
             if (cellData.status === "closed") {
-              await adapter.closeCell(projectPath, cellData.id, "Imported from JSONL");
+              await adapter.closeCell(
+                projectPath,
+                cellData.id,
+                "Imported from JSONL",
+              );
             } else {
-              await adapter.changeCellStatus(projectPath, cellData.id, cellData.status);
+              await adapter.changeCellStatus(
+                projectPath,
+                cellData.id,
+                cellData.status,
+              );
             }
           }
-          
+
           updated++;
         } catch (updateError) {
           // Update failed - count as error
@@ -381,15 +414,16 @@ export async function importJsonlToPGLite(projectPath: string): Promise<{
       } else {
         // Create new cell - use direct DB insert to preserve ID
         const db = await adapter.getDatabase();
-        
-        const status = cellData.status === "tombstone" ? "closed" : cellData.status;
+
+        const status =
+          cellData.status === "tombstone" ? "closed" : cellData.status;
         const isClosed = status === "closed";
         const closedAt = isClosed
-          ? (cellData.closed_at 
-              ? new Date(cellData.closed_at).getTime() 
-              : new Date(cellData.updated_at).getTime())
+          ? cellData.closed_at
+            ? new Date(cellData.closed_at).getTime()
+            : new Date(cellData.updated_at).getTime()
           : null;
-        
+
         await db.query(
           `INSERT INTO beads (
             id, project_key, type, status, title, description, priority,
@@ -408,9 +442,9 @@ export async function importJsonlToPGLite(projectPath: string): Promise<{
             new Date(cellData.created_at).getTime(),
             new Date(cellData.updated_at).getTime(),
             closedAt,
-          ]
+          ],
         );
-        
+
         imported++;
       }
     } catch (error) {
@@ -418,7 +452,7 @@ export async function importJsonlToPGLite(projectPath: string): Promise<{
       errors++;
     }
   }
-  
+
   return { imported, updated, errors };
 }
 
@@ -449,50 +483,82 @@ let exitHookRunning = false;
 /**
  * Register process.on('beforeExit') handler to flush dirty cells
  * This is a safety net - catches any dirty cells that weren't explicitly synced
- * 
+ *
  * Idempotent - safe to call multiple times (only registers once)
  */
+/**
+ * Flush a project's dirty cells to its hive-data mirror
+ * (repos/<slug>/issues.jsonl), never the working repo's .hive/.
+ *
+ * Shared by the exit hook and hive_create_epic's immediate-visibility
+ * flush so both reuse the same resolution as hive_sync rather than
+ * duplicating (and risking re-drifting) the hive-data path logic.
+ * Throws HiveDataRepoError if the hive-data repo is missing/misconfigured
+ * — callers must not catch-and-fall-back to the working repo.
+ */
+async function flushCellsToHiveData(
+  projectKey: string,
+  adapter: HiveAdapter,
+): Promise<{
+  cellsExported: number;
+  hiveDataRoot: string;
+  syncDir: string;
+  slug: string;
+}> {
+  const hiveDataRoot = resolveHiveDataRepoRoot();
+  assertHiveDataRepoReady(hiveDataRoot);
+  assertHiveDataRepoNotMidMerge(hiveDataRoot);
+
+  const slug = await resolveHiveDataSlug(projectKey);
+  const syncDir = hiveDataProjectDir(hiveDataRoot, slug);
+  mkdirSync(syncDir, { recursive: true });
+
+  const flushManager = new FlushManager({
+    adapter,
+    projectKey,
+    outputPath: join(syncDir, "issues.jsonl"),
+  });
+
+  const { cellsExported } = await flushManager.flush();
+  return { cellsExported, hiveDataRoot, syncDir, slug };
+}
+
 function registerExitHook(): void {
   if (exitHookRegistered) {
     return; // Already registered
   }
-  
+
   exitHookRegistered = true;
-  
-  process.on('beforeExit', async (code) => {
+
+  process.on("beforeExit", async (code) => {
     // Prevent re-entry if already flushing
     if (exitHookRunning) {
       return;
     }
-    
+
     exitHookRunning = true;
-    
+
     try {
       // Flush all projects that have adapters (and potentially dirty cells)
       const flushPromises: Promise<void>[] = [];
-      
+
       for (const [projectKey, adapter] of adapterCache.entries()) {
         const flushPromise = (async () => {
           try {
-            ensureHiveDirectory(projectKey);
-            const flushManager = new FlushManager({
-              adapter,
-              projectKey,
-              outputPath: `${projectKey}/.hive/issues.jsonl`,
-            });
-            await flushManager.flush();
+            await flushCellsToHiveData(projectKey, adapter);
           } catch (error) {
-            // Non-fatal - log and continue
+            // Non-fatal - log and continue. Never falls back to writing
+            // the working repo's .hive/ - see flushCellsToHiveData.
             console.warn(
-              `[hive exit hook] Failed to flush ${projectKey}:`,
-              error instanceof Error ? error.message : String(error)
+              `[hive exit hook] Failed to flush ${projectKey} to hive-data:`,
+              error instanceof Error ? error.message : String(error),
             );
           }
         })();
-        
+
         flushPromises.push(flushPromise);
       }
-      
+
       // Wait for all flushes to complete
       await Promise.all(flushPromises);
     } finally {
@@ -507,7 +573,7 @@ registerExitHook();
 /**
  * Get or create a HiveAdapter instance for a project
  * Exported for testing - allows tests to verify state directly
- * 
+ *
  * On first initialization, checks for .beads/issues.jsonl and imports
  * historical beads if the database is empty.
  */
@@ -535,7 +601,7 @@ export const getBeadsAdapter = getHiveAdapter;
 
 /**
  * Clear the hive adapter cache
- * 
+ *
  * Used in tests to ensure clean state between test runs.
  * Clears all cached adapters without closing them (caller should close first).
  */
@@ -547,12 +613,15 @@ export function clearHiveAdapterCache(): void {
  * Auto-migrate cells from .hive/issues.jsonl if:
  * 1. The JSONL file exists
  * 2. The database has no cells for this project
- * 
+ *
  * This enables seamless migration from the old bd CLI to the new PGLite-based system.
  */
-async function autoMigrateFromJSONL(adapter: HiveAdapter, projectKey: string): Promise<void> {
+async function autoMigrateFromJSONL(
+  adapter: HiveAdapter,
+  projectKey: string,
+): Promise<void> {
   const jsonlPath = join(projectKey, ".hive", "issues.jsonl");
-  
+
   // Check if JSONL file exists
   if (!existsSync(jsonlPath)) {
     return;
@@ -574,21 +643,21 @@ async function autoMigrateFromJSONL(adapter: HiveAdapter, projectKey: string): P
     if (result.created > 0 || result.updated > 0) {
       // Use stderr to avoid polluting JSON output on stdout
       console.error(
-        `[hive] Auto-migrated ${result.created} cells from ${jsonlPath} (${result.skipped} skipped, ${result.errors.length} errors)`
+        `[hive] Auto-migrated ${result.created} cells from ${jsonlPath} (${result.skipped} skipped, ${result.errors.length} errors)`,
       );
     }
 
     if (result.errors.length > 0) {
       console.error(
         `[hive] Migration errors:`,
-        result.errors.slice(0, 5).map((e) => `${e.cellId}: ${e.error}`)
+        result.errors.slice(0, 5).map((e) => `${e.cellId}: ${e.error}`),
       );
     }
   } catch (error) {
     // Non-fatal - log and continue
     console.error(
       `[hive] Failed to auto-migrate from ${jsonlPath}:`,
-      error instanceof Error ? error.message : String(error)
+      error instanceof Error ? error.message : String(error),
     );
   }
 }
@@ -598,7 +667,9 @@ async function autoMigrateFromJSONL(adapter: HiveAdapter, projectKey: string): P
  * Adapter uses: type, created_at/updated_at (timestamps)
  * Schema expects: issue_type, created_at/updated_at (ISO strings)
  */
-function formatCellForOutput(adapterCell: AdapterCell): Record<string, unknown> {
+function formatCellForOutput(
+  adapterCell: AdapterCell,
+): Record<string, unknown> {
   return {
     id: adapterCell.id,
     title: adapterCell.title,
@@ -680,10 +751,7 @@ export const hive_create = tool({
       return JSON.stringify(formatted, null, 2);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new HiveError(
-        `Failed to create cell: ${message}`,
-        "hive_create",
-      );
+      throw new HiveError(`Failed to create cell: ${message}`, "hive_create");
     }
   },
 });
@@ -692,9 +760,12 @@ export const hive_create = tool({
  * Create an epic with subtasks in one atomic operation
  */
 export const hive_create_epic = tool({
-  description: "Create epic with subtasks atomically. REQUIRED: epic_title, subtasks (array with {title, files?}). Use after swarm_validate_decomposition confirms your decomposition is valid. Each subtask should list files it will modify to enable parallel work without conflicts.",
+  description:
+    "Create epic with subtasks atomically. REQUIRED: epic_title, subtasks (array with {title, files?}). Use after swarm_validate_decomposition confirms your decomposition is valid. Each subtask should list files it will modify to enable parallel work without conflicts.",
   args: {
-    epic_title: tool.schema.string().describe("Epic title (e.g., 'Implement user auth')"),
+    epic_title: tool.schema
+      .string()
+      .describe("Epic title (e.g., 'Implement user auth')"),
     epic_description: tool.schema
       .string()
       .optional()
@@ -743,24 +814,32 @@ export const hive_create_epic = tool({
     // Validate required parameters with helpful error messages
     const missing: string[] = [];
     if (!args.epic_title) missing.push("epic_title");
-    if (!args.subtasks || args.subtasks.length === 0) missing.push("subtasks (array of subtask objects)");
+    if (!args.subtasks || args.subtasks.length === 0)
+      missing.push("subtasks (array of subtask objects)");
 
     if (missing.length > 0) {
-      return JSON.stringify({
-        success: false,
-        error: `Missing required parameters: ${missing.join(", ")}`,
-        hint: "hive_create_epic creates an epic with subtasks atomically.",
-        example: {
-          epic_title: "Implement user authentication",
-          epic_description: "Add login, logout, and session management",
-          subtasks: [
-            { title: "Create auth service", files: ["src/auth/service.ts"] },
-            { title: "Add login endpoint", files: ["src/api/login.ts"] },
-            { title: "Add session middleware", files: ["src/middleware/session.ts"] },
-          ],
+      return JSON.stringify(
+        {
+          success: false,
+          error: `Missing required parameters: ${missing.join(", ")}`,
+          hint: "hive_create_epic creates an epic with subtasks atomically.",
+          example: {
+            epic_title: "Implement user authentication",
+            epic_description: "Add login, logout, and session management",
+            subtasks: [
+              { title: "Create auth service", files: ["src/auth/service.ts"] },
+              { title: "Add login endpoint", files: ["src/api/login.ts"] },
+              {
+                title: "Add session middleware",
+                files: ["src/middleware/session.ts"],
+              },
+            ],
+          },
+          tip: "Each subtask should have a title and optionally files it will modify. This helps with file reservation and parallel execution.",
         },
-        tip: "Each subtask should have a title and optionally files it will modify. This helps with file reservation and parallel execution.",
-      }, null, 2);
+        null,
+        2,
+      );
     }
 
     const validated = EpicCreateArgsSchema.parse(args);
@@ -807,7 +886,7 @@ export const hive_create_epic = tool({
           title: validated.epic_title,
           description: validated.epic_description,
           subtask_count: validated.subtasks.length,
-          subtask_ids: created.slice(1).map(c => c.id),
+          subtask_ids: created.slice(1).map((c) => c.id),
         },
         "hive_create_epic",
         effectiveProjectKey,
@@ -857,7 +936,7 @@ export const hive_create_epic = tool({
       // Capture decomposition_complete event for eval scoring
       try {
         const { captureCoordinatorEvent } = await import("./eval-capture.js");
-        
+
         // Build files_per_subtask map (indexed by subtask index)
         const filesPerSubtask: Record<number, string[]> = {};
         validated.subtasks.forEach((subtask, index) => {
@@ -866,20 +945,20 @@ export const hive_create_epic = tool({
           }
         });
 
-          captureCoordinatorEvent({
-            session_id: ctx.sessionID || "unknown",
-            epic_id: epic.id,
-            timestamp: new Date().toISOString(),
-            event_type: "DECISION",
-            decision_type: "decomposition_complete",
-            payload: {
-              subtask_count: validated.subtasks.length,
-              strategy_used: args.strategy || "feature-based",
-              files_per_subtask: filesPerSubtask,
-              epic_title: validated.epic_title,
-              task: args.task,
-            },
-          });
+        captureCoordinatorEvent({
+          session_id: ctx.sessionID || "unknown",
+          epic_id: epic.id,
+          timestamp: new Date().toISOString(),
+          event_type: "DECISION",
+          decision_type: "decomposition_complete",
+          payload: {
+            subtask_count: validated.subtasks.length,
+            strategy_used: args.strategy || "feature-based",
+            files_per_subtask: filesPerSubtask,
+            epic_title: validated.epic_title,
+            task: args.task,
+          },
+        });
       } catch (error) {
         // Non-fatal - log and continue
         console.warn(
@@ -888,21 +967,15 @@ export const hive_create_epic = tool({
         );
       }
 
-      // Sync cells to JSONL so spawned workers can see them immediately
+      // Sync cells to the hive-data mirror (never the working repo's
+      // .hive/ - see flushCellsToHiveData). Spawned workers read cells
+      // via the DB/adapter, not this JSONL file, so this is purely for
+      // the git-tracked mirror to stay current.
       try {
-        ensureHiveDirectory(projectKey);
-        const flushManager = new FlushManager({
-          adapter,
-          projectKey,
-          outputPath: `${projectKey}/.hive/issues.jsonl`,
-        });
-        await flushManager.flush();
+        await flushCellsToHiveData(projectKey, adapter);
       } catch (error) {
         // Non-fatal - log and continue
-        console.warn(
-          "[hive_create_epic] Failed to sync to JSONL:",
-          error,
-        );
+        console.warn("[hive_create_epic] Failed to sync to hive-data:", error);
       }
 
       return JSON.stringify(result, null, 2);
@@ -945,7 +1018,8 @@ export const hive_create_epic = tool({
  * Query cells with filters
  */
 export const hive_query = tool({
-  description: "Query hive cells with filters (replaces bd list, bd ready, bd wip)",
+  description:
+    "Query hive cells with filters (replaces bd list, bd ready, bd wip)",
   args: {
     status: tool.schema
       .enum(["open", "in_progress", "blocked", "closed"])
@@ -992,10 +1066,7 @@ export const hive_query = tool({
       return JSON.stringify(formatted, null, 2);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new HiveError(
-        `Failed to query cells: ${message}`,
-        "hive_query",
-      );
+      throw new HiveError(`Failed to query cells: ${message}`, "hive_query");
     }
   },
 });
@@ -1026,8 +1097,10 @@ export const hive_update = tool({
 
     try {
       // Resolve partial ID to full ID
-      const cellId = await resolvePartialId(adapter, projectKey, validated.id) || validated.id;
-      
+      const cellId =
+        (await resolvePartialId(adapter, projectKey, validated.id)) ||
+        validated.id;
+
       let cell: AdapterCell;
 
       // Status changes use changeCellStatus, other fields use updateCell
@@ -1040,7 +1113,10 @@ export const hive_update = tool({
       }
 
       // Update other fields if provided
-      if (validated.description !== undefined || validated.priority !== undefined) {
+      if (
+        validated.description !== undefined ||
+        validated.priority !== undefined
+      ) {
         cell = await adapter.updateCell(projectKey, cellId, {
           description: validated.description,
           priority: validated.priority,
@@ -1049,10 +1125,7 @@ export const hive_update = tool({
         // No changes requested
         const existingCell = await adapter.getCell(projectKey, cellId);
         if (!existingCell) {
-          throw new HiveError(
-            `Cell not found: ${validated.id}`,
-            "hive_update",
-          );
+          throw new HiveError(`Cell not found: ${validated.id}`, "hive_update");
         }
         cell = existingCell;
       }
@@ -1062,7 +1135,8 @@ export const hive_update = tool({
       // Emit cell_updated event for observability
       const fieldsChanged: string[] = [];
       if (validated.status) fieldsChanged.push("status");
-      if (validated.description !== undefined) fieldsChanged.push("description");
+      if (validated.description !== undefined)
+        fieldsChanged.push("description");
       if (validated.priority !== undefined) fieldsChanged.push("priority");
 
       await safeEmitEvent(
@@ -1079,7 +1153,7 @@ export const hive_update = tool({
       return JSON.stringify(formatted, null, 2);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      
+
       // Provide helpful error messages
       if (message.includes("Ambiguous hash")) {
         throw new HiveError(
@@ -1087,17 +1161,17 @@ export const hive_update = tool({
           "hive_update",
         );
       }
-      if (message.includes("Bead not found") || message.includes("Cell not found")) {
+      if (
+        message.includes("Bead not found") ||
+        message.includes("Cell not found")
+      ) {
         throw new HiveError(
           `No cell found matching ID '${validated.id}'`,
           "hive_update",
         );
       }
-      
-      throw new HiveError(
-        `Failed to update cell: ${message}`,
-        "hive_update",
-      );
+
+      throw new HiveError(`Failed to update cell: ${message}`, "hive_update");
     }
   },
 });
@@ -1110,7 +1184,12 @@ export const hive_close = tool({
   args: {
     id: tool.schema.string().describe("Cell ID or partial hash"),
     reason: tool.schema.string().describe("Completion reason"),
-    result: tool.schema.string().optional().describe("Implementation summary - what was actually done (like a PR description)"),
+    result: tool.schema
+      .string()
+      .optional()
+      .describe(
+        "Implementation summary - what was actually done (like a PR description)",
+      ),
   },
   async execute(args, ctx) {
     const validated = CellCloseArgsSchema.parse(args);
@@ -1119,12 +1198,14 @@ export const hive_close = tool({
 
     try {
       // Resolve partial ID to full ID
-      const cellId = await resolvePartialId(adapter, projectKey, validated.id) || validated.id;
-      
+      const cellId =
+        (await resolvePartialId(adapter, projectKey, validated.id)) ||
+        validated.id;
+
       // Get cell details before closing to check if it's an epic
       const cellBeforeClose = await adapter.getCell(projectKey, cellId);
       const isEpic = cellBeforeClose?.type === "epic";
-      
+
       const cell = await adapter.closeCell(
         projectKey,
         cellId,
@@ -1138,21 +1219,31 @@ export const hive_close = tool({
       if (isEpic && cellBeforeClose) {
         try {
           // Query subtasks to gather metrics
-          const subtasks = await adapter.queryCells(projectKey, { parent_id: cellId });
-          const completedSubtasks = subtasks.filter(st => st.status === "closed");
-          const failedSubtasks = subtasks.filter(st => st.status === "blocked");
+          const subtasks = await adapter.queryCells(projectKey, {
+            parent_id: cellId,
+          });
+          const completedSubtasks = subtasks.filter(
+            (st) => st.status === "closed",
+          );
+          const failedSubtasks = subtasks.filter(
+            (st) => st.status === "blocked",
+          );
 
           // Gather all unique files from DecompositionGeneratedEvent
           let totalFilesTouched: string[] = [];
           try {
             const { readEvents } = await import("swarm-mail");
-            const decompositionEvents = await readEvents({
+            const decompositionEvents = await readEvents(
+              {
+                projectKey,
+                types: ["decomposition_generated"],
+              },
               projectKey,
-              types: ["decomposition_generated"],
-            }, projectKey);
+            );
 
-            const epicDecomp = decompositionEvents.find((e: any) =>
-              e.type === "decomposition_generated" && e.epic_id === cellId
+            const epicDecomp = decompositionEvents.find(
+              (e: any) =>
+                e.type === "decomposition_generated" && e.epic_id === cellId,
             );
 
             if (epicDecomp) {
@@ -1165,20 +1256,26 @@ export const hive_close = tool({
               totalFilesTouched = Array.from(allFiles);
             }
           } catch (error) {
-            console.warn("[hive_close] Failed to gather files from decomposition:", error);
+            console.warn(
+              "[hive_close] Failed to gather files from decomposition:",
+              error,
+            );
           }
 
           // Calculate total duration from swarm_started to now
           let totalDurationMs = 0;
           try {
             const { readEvents } = await import("swarm-mail");
-            const swarmStartedEvents = await readEvents({
+            const swarmStartedEvents = await readEvents(
+              {
+                projectKey,
+                types: ["swarm_started"],
+              },
               projectKey,
-              types: ["swarm_started"],
-            }, projectKey);
+            );
 
-            const startEvent = swarmStartedEvents.find((e: any) =>
-              e.type === "swarm_started" && e.epic_id === cellId
+            const startEvent = swarmStartedEvents.find(
+              (e: any) => e.type === "swarm_started" && e.epic_id === cellId,
             );
 
             if (startEvent) {
@@ -1202,26 +1299,31 @@ export const hive_close = tool({
             "hive_close",
             projectKey,
           );
-          
+
           // Run validation hook (fire-and-forget)
           // This validates the swarm event stream and emits validation events
           // Don't block on it - validation is for observability, not a gate
           try {
-            const { runPostSwarmValidation } = await import("./swarm-validation");
+            const { runPostSwarmValidation } = await import(
+              "./swarm-validation"
+            );
             const { readEvents } = await import("swarm-mail");
-            
+
             // Query events for this swarm
-            const swarmEvents = await readEvents({
+            const swarmEvents = await readEvents(
+              {
+                projectKey,
+                types: [
+                  "swarm_started",
+                  "swarm_completed",
+                  "worker_spawned",
+                  "subtask_outcome",
+                  "decomposition_generated",
+                ],
+              },
               projectKey,
-              types: [
-                "swarm_started",
-                "swarm_completed",
-                "worker_spawned",
-                "subtask_outcome",
-                "decomposition_generated",
-              ],
-            }, projectKey);
-            
+            );
+
             // Fire validation asynchronously
             runPostSwarmValidation(
               {
@@ -1235,21 +1337,31 @@ export const hive_close = tool({
                   await appendEvent(event as any, projectKey);
                 },
               },
-              swarmEvents
-            ).then(result => {
-              if (!result.passed) {
-                console.warn(`[Validation] Found ${result.issues.length} issues in swarm ${cellId}`);
-              }
-            }).catch(err => {
-              console.error(`[Validation] Failed:`, err);
-            });
+              swarmEvents,
+            )
+              .then((result) => {
+                if (!result.passed) {
+                  console.warn(
+                    `[Validation] Found ${result.issues.length} issues in swarm ${cellId}`,
+                  );
+                }
+              })
+              .catch((err) => {
+                console.error(`[Validation] Failed:`, err);
+              });
           } catch (error) {
             // Non-fatal - validation is observability, not critical path
-            console.warn("[hive_close] Validation hook failed (non-fatal):", error);
+            console.warn(
+              "[hive_close] Validation hook failed (non-fatal):",
+              error,
+            );
           }
         } catch (error) {
           // Non-fatal - log and continue
-          console.warn("[hive_close] Failed to emit SwarmCompletedEvent:", error);
+          console.warn(
+            "[hive_close] Failed to emit SwarmCompletedEvent:",
+            error,
+          );
         }
       }
 
@@ -1267,7 +1379,7 @@ export const hive_close = tool({
       return `Closed ${cell.id}: ${validated.reason}`;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      
+
       // Provide helpful error messages
       if (message.includes("Ambiguous hash")) {
         throw new HiveError(
@@ -1275,17 +1387,17 @@ export const hive_close = tool({
           "hive_close",
         );
       }
-      if (message.includes("Bead not found") || message.includes("Cell not found")) {
+      if (
+        message.includes("Bead not found") ||
+        message.includes("Cell not found")
+      ) {
         throw new HiveError(
           `No cell found matching ID '${validated.id}'`,
           "hive_close",
         );
       }
-      
-      throw new HiveError(
-        `Failed to close cell: ${message}`,
-        "hive_close",
-      );
+
+      throw new HiveError(`Failed to close cell: ${message}`, "hive_close");
     }
   },
 });
@@ -1305,8 +1417,9 @@ export const hive_start = tool({
 
     try {
       // Resolve partial ID to full ID
-      const cellId = await resolvePartialId(adapter, projectKey, args.id) || args.id;
-      
+      const cellId =
+        (await resolvePartialId(adapter, projectKey, args.id)) || args.id;
+
       const cell = await adapter.changeCellStatus(
         projectKey,
         cellId,
@@ -1326,13 +1439,16 @@ export const hive_start = tool({
         await appendEvent(event, projectKey);
       } catch (error) {
         // Non-fatal - log and continue
-        console.warn("[hive_start] Failed to emit cell_status_changed event:", error);
+        console.warn(
+          "[hive_start] Failed to emit cell_status_changed event:",
+          error,
+        );
       }
 
       return `Started: ${cell.id}`;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      
+
       // Provide helpful error messages
       if (message.includes("Ambiguous hash")) {
         throw new HiveError(
@@ -1340,17 +1456,17 @@ export const hive_start = tool({
           "hive_start",
         );
       }
-      if (message.includes("Bead not found") || message.includes("Cell not found")) {
+      if (
+        message.includes("Bead not found") ||
+        message.includes("Cell not found")
+      ) {
         throw new HiveError(
           `No cell found matching ID '${args.id}'`,
           "hive_start",
         );
       }
-      
-      throw new HiveError(
-        `Failed to start cell: ${message}`,
-        "hive_start",
-      );
+
+      throw new HiveError(`Failed to start cell: ${message}`, "hive_start");
     }
   },
 });
@@ -1408,13 +1524,34 @@ PREFER THIS OVER hive_query when you need to:
 - Find cells matching criteria
 - Look up a cell by partial ID`,
   args: {
-    id: tool.schema.string().optional().describe("Partial or full cell ID to look up"),
-    status: tool.schema.enum(["open", "in_progress", "blocked", "closed"]).optional().describe("Filter by status"),
-    type: tool.schema.enum(["task", "bug", "feature", "epic", "chore"]).optional().describe("Filter by type"),
-    parent_id: tool.schema.string().optional().describe("Filter by parent epic ID (returns children of an epic)"),
-    ready: tool.schema.boolean().optional().describe("If true, return only the next unblocked cell"),
-    limit: tool.schema.number().optional().describe("Max cells to return (default 20)"),
-    project_key: tool.schema.string().optional().describe("Override project scope (use hive_projects to list available)"),
+    id: tool.schema
+      .string()
+      .optional()
+      .describe("Partial or full cell ID to look up"),
+    status: tool.schema
+      .enum(["open", "in_progress", "blocked", "closed"])
+      .optional()
+      .describe("Filter by status"),
+    type: tool.schema
+      .enum(["task", "bug", "feature", "epic", "chore"])
+      .optional()
+      .describe("Filter by type"),
+    parent_id: tool.schema
+      .string()
+      .optional()
+      .describe("Filter by parent epic ID (returns children of an epic)"),
+    ready: tool.schema
+      .boolean()
+      .optional()
+      .describe("If true, return only the next unblocked cell"),
+    limit: tool.schema
+      .number()
+      .optional()
+      .describe("Max cells to return (default 20)"),
+    project_key: tool.schema
+      .string()
+      .optional()
+      .describe("Override project scope (use hive_projects to list available)"),
   },
   async execute(args, ctx) {
     const currentProjectKey = getHiveWorkingDirectory();
@@ -1426,11 +1563,18 @@ PREFER THIS OVER hive_query when you need to:
 
       // If specific ID requested, find all matching cells (supports partial IDs)
       if (args.id) {
-        const matchingCells = await findCellsByPartialId(adapter, effectiveProjectKey, args.id);
+        const matchingCells = await findCellsByPartialId(
+          adapter,
+          effectiveProjectKey,
+          args.id,
+        );
         if (matchingCells.length === 0) {
-          throw new HiveError(`No cell found matching ID '${args.id}'`, "hive_cells");
+          throw new HiveError(
+            `No cell found matching ID '${args.id}'`,
+            "hive_cells",
+          );
         }
-        formatted = matchingCells.map(c => formatCellForOutput(c));
+        formatted = matchingCells.map((c) => formatCellForOutput(c));
       } else if (args.ready) {
         // If ready flag, return next unblocked cell
         const ready = await adapter.getNextReadyCell(effectiveProjectKey);
@@ -1447,7 +1591,7 @@ PREFER THIS OVER hive_query when you need to:
           parent_id: args.parent_id,
           limit: args.limit || 20,
         });
-        formatted = cells.map(c => formatCellForOutput(c));
+        formatted = cells.map((c) => formatCellForOutput(c));
       }
 
       // Build cross-project hint
@@ -1455,10 +1599,12 @@ PREFER THIS OVER hive_query when you need to:
       try {
         const db = await adapter.getDatabase();
         const allProjects = await listProjects(db);
-        const otherProjects = allProjects.filter(p => p.project_key !== effectiveProjectKey);
+        const otherProjects = allProjects.filter(
+          (p) => p.project_key !== effectiveProjectKey,
+        );
         if (otherProjects.length > 0) {
           const projectList = otherProjects
-            .map(p => `${p.project_key} (${p.cell_count})`)
+            .map((p) => `${p.project_key} (${p.cell_count})`)
             .join(", ");
           crossProjectHint = `\n---\nOther projects with cells: ${projectList}\nUse project_key param to query them.`;
         }
@@ -1476,17 +1622,17 @@ PREFER THIS OVER hive_query when you need to:
       const message = error instanceof Error ? error.message : String(error);
 
       // Provide helpful error messages
-      if (message.includes("Bead not found") || message.includes("Cell not found")) {
+      if (
+        message.includes("Bead not found") ||
+        message.includes("Cell not found")
+      ) {
         throw new HiveError(
           `No cell found matching ID '${args.id || "unknown"}'`,
           "hive_cells",
         );
       }
 
-      throw new HiveError(
-        `Failed to query cells: ${message}`,
-        "hive_cells",
-      );
+      throw new HiveError(`Failed to query cells: ${message}`, "hive_cells");
     }
   },
 });
@@ -1495,7 +1641,8 @@ PREFER THIS OVER hive_query when you need to:
  * List all projects with hive cells
  */
 export const hive_projects = tool({
-  description: "List all projects with hive cells. Shows project_key and cell counts across the entire swarm database.",
+  description:
+    "List all projects with hive cells. Shows project_key and cell counts across the entire swarm database.",
   args: {},
   async execute(args, ctx) {
     const currentProjectKey = getHiveWorkingDirectory();
@@ -1505,7 +1652,7 @@ export const hive_projects = tool({
       const db = await adapter.getDatabase();
       const projects = await listProjects(db);
 
-      const result = projects.map(p => ({
+      const result = projects.map((p) => ({
         project_key: p.project_key,
         cell_count: p.cell_count,
         is_current: p.project_key === currentProjectKey,
@@ -1571,30 +1718,49 @@ export const hive_sync = tool({
       }
     };
 
-    // 1. Ensure .hive directory exists before writing
-    ensureHiveDirectory(projectKey);
+    // 1-2. Resolve the hive-data repo and flush cells into it. Fail
+    // loudly here — never silently fall back to writing the working
+    // repo's .hive/. That's exactly the regression this retarget exists
+    // to prevent. Shared with the exit hook and hive_create_epic via
+    // flushCellsToHiveData so all three reuse one resolution path.
+    let hiveDataRoot: string;
+    let syncDir: string;
+    let slug: string;
+    let flushResult: { cellsExported: number };
+    try {
+      const flushed = await withTimeout(
+        flushCellsToHiveData(projectKey, adapter),
+        TIMEOUT_MS,
+        "flush hive",
+      );
+      hiveDataRoot = flushed.hiveDataRoot;
+      syncDir = flushed.syncDir;
+      slug = flushed.slug;
+      flushResult = flushed;
+    } catch (err) {
+      if (err instanceof HiveDataRepoError) {
+        throw new HiveError(err.message, "hive_sync");
+      }
+      throw err;
+    }
+    const syncDirRelative = relative(hiveDataRoot, syncDir);
 
-    // 2. Flush cells to JSONL using FlushManager
-    const flushManager = new FlushManager({
-      adapter,
-      projectKey,
-      outputPath: `${projectKey}/.hive/issues.jsonl`,
-    });
-
-    const flushResult = await withTimeout(
-      flushManager.flush(),
-      TIMEOUT_MS,
-      "flush hive",
-    );
-
-    // 2b. Sync memories to JSONL
+    // 2b. Sync memories into hive-data's global/project split. See
+    // syncProjectMemoriesToHiveData's doc: exports are restricted to this
+    // project's repo_key (falling back to the pre-scoping heuristic on
+    // older DBs); the global file is never written by this sync.
     const swarmMail = await getSwarmMailLibSQL(projectKey);
     const db = await swarmMail.getDatabase();
-    const hivePath = join(projectKey, ".hive");
+    const globalMemoriesPath = join(hiveDataRoot, "global", "memories.jsonl");
+    const projectMemoriesPath = join(syncDir, "memories.jsonl");
     let memoriesSynced = 0;
     try {
-      const memoryResult = await syncMemories(db, hivePath);
-      memoriesSynced = memoryResult.exported;
+      const memoryResult = await syncProjectMemoriesToHiveData(db, {
+        globalMemoriesPath,
+        projectMemoriesPath,
+        repoKey: slug,
+      });
+      memoriesSynced = memoryResult.projectExported;
     } catch (err) {
       // Memory sync is optional - don't fail if it errors
       console.warn("[hive_sync] Memory sync warning:", err);
@@ -1604,28 +1770,35 @@ export const hive_sync = tool({
       return "No cells or memories to sync";
     }
 
-    // 3. Check if there are changes to commit
-    const hiveStatusResult = await runGitCommand([
-      "status",
-      "--porcelain",
-      ".hive/",
-    ]);
+    // 3. Check if there are changes to commit, scoped to this project's
+    // own folder so a concurrent sync from a different project doesn't
+    // get swept into this commit.
+    const hiveStatusResult = await runGitCommand(
+      ["status", "--porcelain", syncDirRelative],
+      hiveDataRoot,
+    );
     const hasChanges = hiveStatusResult.stdout.trim() !== "";
 
     if (hasChanges) {
-      // 4. Stage .hive changes
-      const addResult = await runGitCommand(["add", ".hive/"]);
+      // 4. Stage this project's changes only
+      const addResult = await runGitCommand(
+        ["add", syncDirRelative],
+        hiveDataRoot,
+      );
       if (addResult.exitCode !== 0) {
         throw new HiveError(
-          `Failed to stage hive: ${addResult.stderr}`,
-          "git add .hive/",
+          `Failed to stage hive-data: ${addResult.stderr}`,
+          `git add ${syncDirRelative}`,
           addResult.exitCode,
         );
       }
 
       // 5. Commit
       const commitResult = await withTimeout(
-        runGitCommand(["commit", "-m", "chore: sync hive"]),
+        runGitCommand(
+          ["commit", "-m", `chore: sync hive (${slug})`],
+          hiveDataRoot,
+        ),
         TIMEOUT_MS,
         "git commit",
       );
@@ -1634,7 +1807,7 @@ export const hive_sync = tool({
         !commitResult.stdout.includes("nothing to commit")
       ) {
         throw new HiveError(
-          `Failed to commit hive: ${commitResult.stderr}`,
+          `Failed to commit hive-data: ${commitResult.stderr}`,
           "git commit",
           commitResult.exitCode,
         );
@@ -1643,18 +1816,24 @@ export const hive_sync = tool({
 
     // 6. Pull if requested (check if remote exists first)
     if (autoPull) {
-      const remoteCheckResult = await runGitCommand(["remote"]);
+      const remoteCheckResult = await runGitCommand(["remote"], hiveDataRoot);
       const hasRemote = remoteCheckResult.stdout.trim() !== "";
 
       if (hasRemote) {
         // Check for unstaged changes that would block pull --rebase
-        const statusResult = await runGitCommand(["status", "--porcelain"]);
+        const statusResult = await runGitCommand(
+          ["status", "--porcelain"],
+          hiveDataRoot,
+        );
         const hasUnstagedChanges = statusResult.stdout.trim() !== "";
         let didStash = false;
 
         if (hasUnstagedChanges) {
           // Stash all changes (including untracked) before pull
-          const stashResult = await runGitCommand(["stash", "push", "-u", "-m", "hive_sync: auto-stash before pull"]);
+          const stashResult = await runGitCommand(
+            ["stash", "push", "-u", "-m", "hive_sync: auto-stash before pull"],
+            hiveDataRoot,
+          );
           if (stashResult.exitCode === 0) {
             didStash = true;
           }
@@ -1663,7 +1842,7 @@ export const hive_sync = tool({
 
         try {
           const pullResult = await withTimeout(
-            runGitCommand(["pull", "--rebase"]),
+            runGitCommand(["pull", "--rebase"], hiveDataRoot),
             TIMEOUT_MS,
             "git pull --rebase",
           );
@@ -1678,10 +1857,15 @@ export const hive_sync = tool({
         } finally {
           // Pop stash if we stashed
           if (didStash) {
-            const popResult = await runGitCommand(["stash", "pop"]);
+            const popResult = await runGitCommand(
+              ["stash", "pop"],
+              hiveDataRoot,
+            );
             if (popResult.exitCode !== 0) {
               // Stash pop failed - likely a conflict. Log warning but don't fail sync.
-              console.warn(`[hive_sync] Warning: stash pop failed. Your changes are in 'git stash list'. Error: ${popResult.stderr}`);
+              console.warn(
+                `[hive_sync] Warning: stash pop failed. Your changes are in 'git stash list' in ${hiveDataRoot}. Error: ${popResult.stderr}`,
+              );
             }
           }
         }
@@ -1689,13 +1873,13 @@ export const hive_sync = tool({
     }
 
     // 7. Push (check if remote exists first)
-    const remoteCheckResult = await runGitCommand(["remote"]);
+    const remoteCheckResult = await runGitCommand(["remote"], hiveDataRoot);
     const hasRemote = remoteCheckResult.stdout.trim() !== "";
 
     let pushSuccess = false;
     if (hasRemote) {
       const pushResult = await withTimeout(
-        runGitCommand(["push"]),
+        runGitCommand(["push"], hiveDataRoot),
         TIMEOUT_MS,
         "git push",
       );
@@ -1723,9 +1907,9 @@ export const hive_sync = tool({
     }
 
     if (hasRemote) {
-      return "Hive synced and pushed successfully";
+      return `Hive synced to hive-data (${syncDirRelative}) and pushed successfully`;
     } else {
-      return "Hive synced successfully (no remote configured)";
+      return `Hive synced to hive-data (${syncDirRelative}) successfully (no remote configured)`;
     }
   },
 });
@@ -1783,7 +1967,7 @@ export const hive_link_thread = tool({
 
 /**
  * Start a work session
- * 
+ *
  * Shows previous session's handoff notes if available.
  * Inspired by Chainlink's session management pattern.
  * Credit: @dollspace-gay (https://github.com/dollspace-gay/chainlink)
@@ -1805,12 +1989,16 @@ export const hive_session_start = tool({
         active_cell_id: args.active_cell_id,
       });
 
-      return JSON.stringify({
-        session_id: session.id,
-        started_at: new Date(session.started_at).toISOString(),
-        active_cell_id: session.active_cell_id,
-        previous_handoff_notes: session.previous_handoff_notes,
-      }, null, 2);
+      return JSON.stringify(
+        {
+          session_id: session.id,
+          started_at: new Date(session.started_at).toISOString(),
+          active_cell_id: session.active_cell_id,
+          previous_handoff_notes: session.previous_handoff_notes,
+        },
+        null,
+        2,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new HiveError(
@@ -1823,11 +2011,12 @@ export const hive_session_start = tool({
 
 /**
  * End the current work session
- * 
+ *
  * Optionally save handoff notes for next session.
  */
 export const hive_session_end = tool({
-  description: "End current session with optional handoff notes for next session",
+  description:
+    "End current session with optional handoff notes for next session",
   args: {
     handoff_notes: tool.schema
       .string()
@@ -1843,10 +2032,7 @@ export const hive_session_end = tool({
       const currentSession = await adapter.getCurrentSession(projectKey);
 
       if (!currentSession) {
-        throw new HiveError(
-          "No active session to end",
-          "hive_session_end",
-        );
+        throw new HiveError("No active session to end", "hive_session_end");
       }
 
       // End session
@@ -1860,13 +2046,17 @@ export const hive_session_end = tool({
 
       const duration = endedSession.ended_at! - endedSession.started_at;
 
-      return JSON.stringify({
-        session_id: endedSession.id,
-        started_at: new Date(endedSession.started_at).toISOString(),
-        ended_at: new Date(endedSession.ended_at!).toISOString(),
-        duration_ms: duration,
-        handoff_notes: endedSession.handoff_notes,
-      }, null, 2);
+      return JSON.stringify(
+        {
+          session_id: endedSession.id,
+          started_at: new Date(endedSession.started_at).toISOString(),
+          ended_at: new Date(endedSession.ended_at!).toISOString(),
+          duration_ms: duration,
+          handoff_notes: endedSession.handoff_notes,
+        },
+        null,
+        2,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new HiveError(
@@ -1910,7 +2100,7 @@ const warnedTools = new Set<string>();
 /**
  * Log a deprecation warning for a renamed tool.
  * Only warns once per tool name per session.
- * 
+ *
  * @param oldName - The deprecated tool name (e.g., "hive_create")
  * @param newName - The new tool name to use instead (e.g., "hive_create")
  */
@@ -1918,10 +2108,10 @@ function warnDeprecated(oldName: string, newName: string): void {
   if (warnedTools.has(oldName)) {
     return; // Already warned
   }
-  
+
   warnedTools.add(oldName);
   console.warn(
-    `[DEPRECATED] ${oldName} is deprecated, use ${newName} instead. Will be removed in v1.0`
+    `[DEPRECATED] ${oldName} is deprecated, use ${newName} instead. Will be removed in v1.0`,
   );
 }
 
@@ -1935,9 +2125,9 @@ function warnDeprecated(oldName: string, newName: string): void {
 export const beads_create = tool({
   ...hive_create,
   async execute(args, ctx) {
-    warnDeprecated('beads_create', 'hive_create');
+    warnDeprecated("beads_create", "hive_create");
     return hive_create.execute(args, ctx);
-  }
+  },
 });
 
 /**
@@ -1946,9 +2136,9 @@ export const beads_create = tool({
 export const beads_create_epic = tool({
   ...hive_create_epic,
   async execute(args, ctx) {
-    warnDeprecated('beads_create_epic', 'hive_create_epic');
+    warnDeprecated("beads_create_epic", "hive_create_epic");
     return hive_create_epic.execute(args, ctx);
-  }
+  },
 });
 
 /**
@@ -1957,9 +2147,9 @@ export const beads_create_epic = tool({
 export const beads_query = tool({
   ...hive_query,
   async execute(args, ctx) {
-    warnDeprecated('beads_query', 'hive_query');
+    warnDeprecated("beads_query", "hive_query");
     return hive_query.execute(args, ctx);
-  }
+  },
 });
 
 /**
@@ -1968,9 +2158,9 @@ export const beads_query = tool({
 export const beads_update = tool({
   ...hive_update,
   async execute(args, ctx) {
-    warnDeprecated('beads_update', 'hive_update');
+    warnDeprecated("beads_update", "hive_update");
     return hive_update.execute(args, ctx);
-  }
+  },
 });
 
 /**
@@ -1979,9 +2169,9 @@ export const beads_update = tool({
 export const beads_close = tool({
   ...hive_close,
   async execute(args, ctx) {
-    warnDeprecated('beads_close', 'hive_close');
+    warnDeprecated("beads_close", "hive_close");
     return hive_close.execute(args, ctx);
-  }
+  },
 });
 
 /**
@@ -1990,9 +2180,9 @@ export const beads_close = tool({
 export const beads_start = tool({
   ...hive_start,
   async execute(args, ctx) {
-    warnDeprecated('beads_start', 'hive_start');
+    warnDeprecated("beads_start", "hive_start");
     return hive_start.execute(args, ctx);
-  }
+  },
 });
 
 /**
@@ -2001,9 +2191,9 @@ export const beads_start = tool({
 export const beads_ready = tool({
   ...hive_ready,
   async execute(args, ctx) {
-    warnDeprecated('beads_ready', 'hive_ready');
+    warnDeprecated("beads_ready", "hive_ready");
     return hive_ready.execute(args, ctx);
-  }
+  },
 });
 
 /**
@@ -2012,9 +2202,9 @@ export const beads_ready = tool({
 export const beads_sync = tool({
   ...hive_sync,
   async execute(args, ctx) {
-    warnDeprecated('beads_sync', 'hive_sync');
+    warnDeprecated("beads_sync", "hive_sync");
     return hive_sync.execute(args, ctx);
-  }
+  },
 });
 
 /**
@@ -2023,9 +2213,9 @@ export const beads_sync = tool({
 export const beads_link_thread = tool({
   ...hive_link_thread,
   async execute(args, ctx) {
-    warnDeprecated('beads_link_thread', 'hive_link_thread');
+    warnDeprecated("beads_link_thread", "hive_link_thread");
     return hive_link_thread.execute(args, ctx);
-  }
+  },
 });
 
 /**

@@ -29,18 +29,18 @@ export { log as debugLog } from "./debug";
 
 export { createSwarmMailAdapter } from "./adapter";
 export type {
-	AgentAdapter,
-	Conflict,
-	DatabaseAdapter,
-	EventStoreAdapter,
-	InboxOptions,
-	Message,
-	MessagingAdapter,
-	ReadEventsOptions,
-	Reservation,
-	ReservationAdapter,
-	SchemaAdapter,
-	SwarmMailAdapter,
+  AgentAdapter,
+  Conflict,
+  DatabaseAdapter,
+  EventStoreAdapter,
+  InboxOptions,
+  Message,
+  MessagingAdapter,
+  ReadEventsOptions,
+  Reservation,
+  ReservationAdapter,
+  SchemaAdapter,
+  SwarmMailAdapter,
 } from "./types";
 
 // ============================================================================
@@ -52,27 +52,27 @@ export { createLibSQLAdapter } from "./libsql";
 
 // LibSQL Convenience Layer
 export {
-	closeAllSwarmMailLibSQL,
-	closeAllSwarmMailLibSQL as closeAllSwarmMail, // Alias for backward compatibility
-	closeSwarmMailLibSQL,
-	createInMemorySwarmMailLibSQL,
-	createInMemorySwarmMailLibSQL as createInMemorySwarmMail, // Alias for backward compatibility
-	getDatabasePath as getLibSQLDatabasePath,
-	getProjectTempDirName as getLibSQLProjectTempDirName,
-	getSwarmMailLibSQL,
-	hashProjectPath as hashLibSQLProjectPath,
+  closeAllSwarmMailLibSQL,
+  closeAllSwarmMailLibSQL as closeAllSwarmMail, // Alias for backward compatibility
+  closeSwarmMailLibSQL,
+  createInMemorySwarmMailLibSQL,
+  createInMemorySwarmMailLibSQL as createInMemorySwarmMail, // Alias for backward compatibility
+  getDatabasePath as getLibSQLDatabasePath,
+  getProjectTempDirName as getLibSQLProjectTempDirName,
+  getSwarmMailLibSQL,
+  hashProjectPath as hashLibSQLProjectPath,
 } from "./libsql.convenience";
 export {
-	createLibSQLMemorySchema,
-	dropLibSQLMemorySchema,
-	EMBEDDING_DIM as LIBSQL_EMBEDDING_DIM,
-	validateLibSQLMemorySchema,
+  createLibSQLMemorySchema,
+  dropLibSQLMemorySchema,
+  EMBEDDING_DIM as LIBSQL_EMBEDDING_DIM,
+  validateLibSQLMemorySchema,
 } from "./memory/libsql-schema";
 // LibSQL Schemas
 export {
-	createLibSQLStreamsSchema,
-	dropLibSQLStreamsSchema,
-	validateLibSQLStreamsSchema,
+  createLibSQLStreamsSchema,
+  dropLibSQLStreamsSchema,
+  validateLibSQLStreamsSchema,
 } from "./streams/libsql-schema";
 
 // ============================================================================
@@ -84,72 +84,72 @@ export { checkHealth as checkSwarmHealth } from "./streams/agent-mail";
 
 // Auto-migration (project DB → global DB)
 export {
-	backupOldDb,
-	detectSourceType,
-	getGlobalDbPath,
-	migrateLibSQLToGlobal,
-	migrateLocalDbToGlobal,
-	migratePGLiteToGlobal,
-	migrateProjectToGlobal,
-	needsMigration,
+  backupOldDb,
+  detectSourceType,
+  getGlobalDbPath,
+  migrateLibSQLToGlobal,
+  migrateLocalDbToGlobal,
+  migratePGLiteToGlobal,
+  migrateProjectToGlobal,
+  needsMigration,
 } from "./streams/auto-migrate";
 export type {
-	MigrationResult as AutoMigrationResult,
-	MigrationStats as AutoMigrationStats,
-	SourceType,
+  MigrationResult as AutoMigrationResult,
+  MigrationStats as AutoMigrationStats,
+  SourceType,
 } from "./streams/auto-migrate";
 export type {
-	DecompositionGeneratedEvent,
-	MailSessionState,
-	SubtaskOutcomeEvent,
+  DecompositionGeneratedEvent,
+  MailSessionState,
+  SubtaskOutcomeEvent,
 } from "./streams/events";
 // Event types and creation (from events.ts)
 export { createEvent } from "./streams/events";
 // Event store primitives (now using Drizzle via wrapper functions)
 // Projections (now using Drizzle via wrapper functions)
 export {
-	appendEvent,
-	clearAdapterCache,
-	getActiveReservations,
-	getAgent,
-	getEvalRecords,
-	getEvalStats,
-	getOldProjectDbPaths,
-	readEvents,
+  appendEvent,
+  clearAdapterCache,
+  getActiveReservations,
+  getAgent,
+  getEvalRecords,
+  getEvalStats,
+  getOldProjectDbPaths,
+  readEvents,
 } from "./streams/index";
 export type { EvalRecord } from "./streams/projections-drizzle";
 // Swarm Mail functions
 export {
-	acknowledgeSwarmMessage,
-	checkSwarmHealth as checkSwarmMailHealth,
-	getSwarmInbox,
-	initSwarmAgent,
-	readSwarmMessage,
-	releaseSwarmFiles,
-	releaseAllSwarmFiles,
-	releaseSwarmFilesForAgent,
-	reserveSwarmFiles,
-	sendSwarmMessage,
+  acknowledgeSwarmMessage,
+  checkSwarmHealth as checkSwarmMailHealth,
+  getSwarmInbox,
+  initSwarmAgent,
+  readSwarmMessage,
+  releaseSwarmFiles,
+  releaseAllSwarmFiles,
+  releaseSwarmFilesForAgent,
+  reserveSwarmFiles,
+  sendSwarmMessage,
 } from "./streams/swarm-mail";
 
 // Decision trace store for observability
 export {
-	createDecisionTrace,
-	findDecisionTraceByBead,
-	getDecisionTracesByAgent,
-	getDecisionTracesByEpic,
-	getDecisionTracesByType,
-	linkOutcomeToTrace,
-	findSimilarDecisions,
-	getStrategySuccessRates,
-	createEntityLink,
-	calculateDecisionQuality,
-	getDecisionsByMemoryPattern,
+  createDecisionTrace,
+  findDecisionTraceByBead,
+  getDecisionTracesByAgent,
+  getDecisionTracesByEpic,
+  getDecisionTracesByType,
+  linkOutcomeToTrace,
+  findSimilarDecisions,
+  getStrategySuccessRates,
+  createEntityLink,
+  calculateDecisionQuality,
+  getDecisionsByMemoryPattern,
 } from "./streams/decision-trace-store";
 export type {
-	DecisionTrace,
-	DecisionTraceInput,
-	EntityLinkInput,
+  DecisionTrace,
+  DecisionTraceInput,
+  EntityLinkInput,
 } from "./streams/decision-trace-store";
 
 // Database path utilities
@@ -160,15 +160,15 @@ export { getDatabasePath } from "./streams/index";
 // ============================================================================
 
 export {
-	createDurableStreamAdapter,
-	type DurableStreamAdapter,
-	type StreamEvent,
+  createDurableStreamAdapter,
+  type DurableStreamAdapter,
+  type StreamEvent,
 } from "./streams/durable-adapter.js";
 
 export {
-	createDurableStreamServer,
-	type DurableStreamServer,
-	type DurableStreamServerConfig,
+  createDurableStreamServer,
+  type DurableStreamServer,
+  type DurableStreamServerConfig,
 } from "./streams/durable-server.js";
 
 // ============================================================================
@@ -177,30 +177,30 @@ export {
 
 // Event-sourcing analytics (queries 1-10 from analytics/)
 export {
-	agentActivity,
-	checkpointFrequency,
-	failedDecompositions,
-	formatCSV,
-	formatJSON,
-	formatJSONL,
-	formatTable,
-	humanFeedback,
-	lockContention,
-	messageLatency,
-	QueryBuilder,
-	recoverySuccess,
-	scopeViolations,
-	strategySuccessRates,
-	taskDuration,
+  agentActivity,
+  checkpointFrequency,
+  failedDecompositions,
+  formatCSV,
+  formatJSON,
+  formatJSONL,
+  formatTable,
+  humanFeedback,
+  lockContention,
+  messageLatency,
+  QueryBuilder,
+  recoverySuccess,
+  scopeViolations,
+  strategySuccessRates,
+  taskDuration,
 } from "./analytics/index.js";
 export type {
-	AgentActivityFilters,
-	FailedDecompositionsFilters,
-	LockContentionFilters,
-	MessageLatencyFilters,
-	OutputFormat,
-	QueryResult,
-	StrategySuccessRatesFilters,
+  AgentActivityFilters,
+  FailedDecompositionsFilters,
+  LockContentionFilters,
+  MessageLatencyFilters,
+  OutputFormat,
+  QueryResult,
+  StrategySuccessRatesFilters,
 } from "./analytics/index.js";
 
 // Four Golden Signals analytics (new root-level module)
@@ -223,62 +223,91 @@ export { createMemoryAdapter } from "./memory/adapter";
 
 // Pagination API for field selection (token budget optimization)
 export {
-	FIELD_SETS,
-	projectSearchResult,
-	projectSearchResults,
+  FIELD_SETS,
+  projectSearchResult,
+  projectSearchResults,
 } from "./sessions/pagination";
 export type {
-	FieldSelection,
-	FieldSet,
-	MemoryField,
-	SearchResultField,
+  FieldSelection,
+  FieldSet,
+  MemoryField,
+  SearchResultField,
 } from "./sessions/pagination";
 
 export type {
-	MigrationOptions,
-	MigrationResult,
+  MigrationOptions,
+  MigrationResult,
 } from "./memory/migrate-legacy";
 export {
-	getDefaultLegacyPath,
-	getMigrationStatus,
-	legacyDatabaseExists,
-	migrateLegacyMemories,
-	targetHasMemories,
+  getDefaultLegacyPath,
+  getMigrationStatus,
+  legacyDatabaseExists,
+  migrateLegacyMemories,
+  targetHasMemories,
 } from "./memory/migrate-legacy";
 export {
-	memoryMigration,
-	memoryMigrations,
+  memoryMigration,
+  memoryMigrations,
 } from "./memory/migrations";
 export type { MemoryConfig } from "./memory/ollama";
 export {
-	getDefaultConfig,
-	makeOllamaLive,
-	Ollama,
-	OllamaError,
+  getDefaultConfig,
+  makeOllamaLive,
+  Ollama,
+  OllamaError,
 } from "./memory/ollama";
 export type {
-	Memory,
-	SearchOptions,
-	SearchResult,
+  Memory,
+  SearchOptions,
+  SearchResult,
 } from "./memory/store";
 export {
-	createMemoryStore,
-	EMBEDDING_DIM,
+  createMemoryStore,
+  EMBEDDING_DIM,
 } from "./memory/store";
+
+// Memory scope resolution (repo/package/global) - see memory/scope.ts
+export type { MemoryScope, ScopeInput } from "./memory/scope";
+export {
+  GLOBAL_SCOPE,
+  resolveMemoryScope,
+  resolveStoreScope,
+} from "./memory/scope";
+
+// Memory scope rename & orphan detection - see memory/rename-scope.ts
 export type {
-	ExportOptions as MemoryExportOptions,
-	ImportOptions as MemoryImportOptions,
-	MemoryExport,
-	MemoryImportResult,
+  OrphanedPackageKey,
+  OrphanedRepoKey,
+  RenameResult,
+} from "./memory/rename-scope";
+export {
+  findOrphanedPackageKeys,
+  findOrphanedRepoKeys,
+  renamePackageKey,
+  renameRepoKey,
+} from "./memory/rename-scope";
+export type {
+  ExportOptions as MemoryExportOptions,
+  ImportOptions as MemoryImportOptions,
+  MemoryExport,
+  MemoryImportResult,
 } from "./memory/sync";
 // Memory sync (JSONL export/import for git)
 export {
-	exportMemories,
-	importMemories,
-	parseMemoryJSONL,
-	serializeMemoryToJSONL,
-	syncMemories,
+  exportMemories,
+  importMemories,
+  parseMemoryJSONL,
+  serializeMemoryToJSONL,
+  syncMemories,
 } from "./memory/sync";
+
+// hive-data global/project memory split (predates repo_key/package_key
+// columns above; still the JSONL-side mechanism for hive_sync git export)
+export type {
+  HiveDataMemorySyncOptions,
+  HiveDataMemorySyncResult,
+} from "./memory/hive-data-sync";
+export { syncProjectMemoriesToHiveData } from "./memory/hive-data-sync";
 
 // Memory test utilities
 export { createTestMemoryDb } from "./memory/test-utils";
@@ -290,59 +319,59 @@ export { createTestMemoryDb } from "./memory/test-utils";
 // Smart operations (ADD/UPDATE/DELETE/NOOP analysis)
 export { analyzeMemoryOperation } from "./memory/memory-operations";
 export type {
-	MemoryOperation,
-	MemoryOperationConfig,
+  MemoryOperation,
+  MemoryOperationConfig,
 } from "./memory/memory-operations";
 
 // Auto-tagging (LLM-powered tag generation)
 export { generateTags } from "./memory/auto-tagger";
 export type {
-	AutoTagConfig,
-	AutoTagResult,
+  AutoTagConfig,
+  AutoTagResult,
 } from "./memory/auto-tagger";
 
 // Memory linking (semantic relationship detection)
 export {
-	autoLinkMemory,
-	createLink,
-	findRelatedMemories,
-	getLinks,
-	updateLinkStrength,
+  autoLinkMemory,
+  createLink,
+  findRelatedMemories,
+  getLinks,
+  updateLinkStrength,
 } from "./memory/memory-linking";
 export type {
-	LinkingConfig,
-	MemoryLink,
+  LinkingConfig,
+  MemoryLink,
 } from "./memory/memory-linking";
 
 // Entity extraction (knowledge graph building)
 export {
-	extractEntitiesAndRelationships,
-	getEntitiesByType,
-	getRelationshipsForEntity,
-	linkMemoryToEntities,
-	storeEntities,
-	storeRelationships,
+  extractEntitiesAndRelationships,
+  getEntitiesByType,
+  getRelationshipsForEntity,
+  linkMemoryToEntities,
+  storeEntities,
+  storeRelationships,
 } from "./memory/entity-extraction";
 export type {
-	Entity,
-	ExtractionResult,
-	Relationship,
+  Entity,
+  ExtractionResult,
+  Relationship,
 } from "./memory/entity-extraction";
 
 // Taxonomy extraction (SKOS knowledge organization)
 export {
-	extractTaxonomy,
-	findByTaxonomy,
-	getEntityHierarchy,
-	getInverseRelationships,
-	getTaxonomyForEntity,
-	storeTaxonomy,
+  extractTaxonomy,
+  findByTaxonomy,
+  getEntityHierarchy,
+  getInverseRelationships,
+  getTaxonomyForEntity,
+  storeTaxonomy,
 } from "./memory/taxonomy-extraction";
 export type {
-	ExtractedTaxonomyRelationship,
-	RelationshipType,
-	TaxonomyExtractionResult,
-	TaxonomyRelationship,
+  ExtractedTaxonomyRelationship,
+  RelationshipType,
+  TaxonomyExtractionResult,
+  TaxonomyRelationship,
 } from "./memory/taxonomy-extraction";
 
 // ============================================================================
@@ -360,15 +389,15 @@ export { toDrizzleDb, toSwarmDb } from "./libsql.convenience";
 // ============================================================================
 
 export {
-	analyzeStrayDatabase,
-	consolidateDatabases,
-	detectStrayDatabases,
-	migrateToGlobal,
+  analyzeStrayDatabase,
+  consolidateDatabases,
+  detectStrayDatabases,
+  migrateToGlobal,
 } from "./db/consolidate-databases";
 export type {
-	ConsolidationOptions,
-	ConsolidationReport,
-	StrayDatabase,
+  ConsolidationOptions,
+  ConsolidationReport,
+  StrayDatabase,
 } from "./db/consolidate-databases";
 
 // ============================================================================
@@ -383,12 +412,12 @@ export type { FileEvent, FileWatcherOptions } from "./sessions/file-watcher";
 
 export { SessionIndexer } from "./sessions/session-indexer";
 export type {
-	IndexDirectoryOptions,
-	IndexFileResult,
-	IndexHealth,
-	SearchOptions as SessionSearchOptions,
-	SessionStats,
-	StalenessResult,
+  IndexDirectoryOptions,
+  IndexFileResult,
+  IndexHealth,
+  SearchOptions as SessionSearchOptions,
+  SessionStats,
+  StalenessResult,
 } from "./sessions/session-indexer";
 
 // ============================================================================
@@ -396,15 +425,15 @@ export type {
 // ============================================================================
 
 export {
-	type MigrationOptions as PGliteMigrationOptions,
-	type MigrationResult as PGliteMigrationResult,
-	migratePGliteToLibSQL,
-	pgliteExists,
+  type MigrationOptions as PGliteMigrationOptions,
+  type MigrationResult as PGliteMigrationResult,
+  migratePGliteToLibSQL,
+  pgliteExists,
 } from "./migrate-pglite-to-libsql";
 
 export {
-	warnPGliteDeprecation,
-	wrapPGlite,
+  warnPGliteDeprecation,
+  wrapPGlite,
 } from "./pglite";
 
 // ============================================================================
@@ -412,12 +441,12 @@ export {
 // ============================================================================
 
 export {
-	transformIssue,
-	transformEvent,
-	transformDependency,
-	migrateLegacyHive,
-	type LegacyIssue,
-	type LegacyEvent,
-	type LegacyDependency,
-	type MigrationSummary as LegacyHiveMigrationSummary,
+  transformIssue,
+  transformEvent,
+  transformDependency,
+  migrateLegacyHive,
+  type LegacyIssue,
+  type LegacyEvent,
+  type LegacyDependency,
+  type MigrationSummary as LegacyHiveMigrationSummary,
 } from "./migrations/legacy-hive-transformer";

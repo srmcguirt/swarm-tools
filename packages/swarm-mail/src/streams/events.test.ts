@@ -235,7 +235,7 @@ describe("FileReservedEventSchema", () => {
     };
     expect(() => FileReservedEventSchema.parse(event)).toThrow();
   });
-  
+
   it("validates file_reserved with context fields", () => {
     const event = {
       type: "file_reserved",
@@ -255,7 +255,7 @@ describe("FileReservedEventSchema", () => {
     };
     expect(() => FileReservedEventSchema.parse(event)).not.toThrow();
   });
-  
+
   it("validates file_reserved with conflict", () => {
     const event = {
       type: "file_reserved",
@@ -329,7 +329,7 @@ describe("FileReleasedEventSchema", () => {
     };
     expect(() => FileReleasedEventSchema.parse(event)).not.toThrow();
   });
-  
+
   it("validates file_released with context fields", () => {
     const event = {
       type: "file_released",
@@ -1068,7 +1068,7 @@ describe("Edge cases", () => {
 });
 
 // ============================================================================
-// Enhanced Checkpoint Events Tests  
+// Enhanced Checkpoint Events Tests
 // ============================================================================
 
 describe("Enhanced SwarmCheckpointedEvent", () => {
@@ -1104,7 +1104,12 @@ describe("Enhanced SwarmCheckpointedEvent", () => {
   });
 
   it("validates trigger enum values", () => {
-    const validTriggers: Array<"manual" | "auto" | "progress" | "error"> = ["manual", "auto", "progress", "error"];
+    const validTriggers: Array<"manual" | "auto" | "progress" | "error"> = [
+      "manual",
+      "auto",
+      "progress",
+      "error",
+    ];
     for (const trigger of validTriggers) {
       expect(() =>
         createEvent("swarm_checkpointed", {
@@ -1216,7 +1221,12 @@ describe("CheckpointCreatedEvent", () => {
   });
 
   it("validates trigger enum for checkpoint_created", () => {
-    const validTriggers: Array<"manual" | "auto" | "progress" | "error"> = ["manual", "auto", "progress", "error"];
+    const validTriggers: Array<"manual" | "auto" | "progress" | "error"> = [
+      "manual",
+      "auto",
+      "progress",
+      "error",
+    ];
     for (const trigger of validTriggers) {
       expect(() =>
         createEvent("checkpoint_created", {
@@ -1638,7 +1648,7 @@ describe("appendEvent persistence to libSQL", () => {
 
   it("appendEvent writes to libSQL and persists across calls", async () => {
     const projectPath = "/tmp/test-persistence";
-    
+
     // Create and append an event
     const event = createEvent("agent_registered", {
       project_key: "test-project",
@@ -1658,11 +1668,11 @@ describe("appendEvent persistence to libSQL", () => {
 
     // Read back from database to verify persistence
     const readResult = await readEvents(
-      { 
+      {
         projectKey: "test-project",
-        types: ["agent_registered"]
+        types: ["agent_registered"],
       },
-      projectPath
+      projectPath,
     );
 
     expect(readResult).toHaveLength(1);
@@ -1673,7 +1683,7 @@ describe("appendEvent persistence to libSQL", () => {
 
   it("verifies database is file-based, not in-memory", async () => {
     const projectPath = "/tmp/test-persistence";
-    
+
     // Append event
     const event = createEvent("agent_registered", {
       project_key: "test-project",
@@ -1690,7 +1700,7 @@ describe("appendEvent persistence to libSQL", () => {
     // Read from a fresh connection - should still see the event
     const readResult = await readEvents(
       { projectKey: "test-project" },
-      projectPath
+      projectPath,
     );
 
     expect(readResult).toHaveLength(1);
@@ -1699,11 +1709,11 @@ describe("appendEvent persistence to libSQL", () => {
 
   it("appendEvent uses Drizzle ORM, not raw SQL", async () => {
     const projectPath = "/tmp/test-persistence";
-    
+
     // The appendEvent function in store-drizzle.ts uses:
     // db.insert(eventsTable).values(...).returning(...)
     // This is Drizzle's query builder, not raw SQL
-    
+
     const event = createEvent("message_sent", {
       project_key: "test-project",
       from_agent: "Agent1",
@@ -1719,17 +1729,22 @@ describe("appendEvent persistence to libSQL", () => {
     // If Drizzle ORM is working, we should get id and sequence back
     expect(result.id).toBeTypeOf("number");
     expect(result.sequence).toBeTypeOf("number");
-    
+
     // Verify materialized views were updated (Drizzle's updateMaterializedViewsDrizzle)
-    const events = await readEvents({ projectKey: "test-project" }, projectPath);
+    const events = await readEvents(
+      { projectKey: "test-project" },
+      projectPath,
+    );
     expect(events).toHaveLength(1);
     expect(events[0]?.type).toBe("message_sent");
   });
 
   it("verifies database path resolves correctly", async () => {
-    // NEW BEHAVIOR: Database is always at global path ~/.config/swarm-tools/swarm.db
+    // NEW BEHAVIOR: Database is always at the global path, which in tests is
+    // the SWARM_DB_PATH override set by test-preload.ts, never the real
+    // ~/.config/swarm-tools/swarm.db (see the RUNTIME GUARD in streams/index.ts).
     const projectPath = "/tmp/test-persistence";
-    
+
     const event = createEvent("agent_registered", {
       project_key: "test-project",
       agent_name: "PathTestAgent",
@@ -1739,14 +1754,16 @@ describe("appendEvent persistence to libSQL", () => {
 
     await appendEvent(event, projectPath);
 
-    // Verify database file exists at global location
-    const expectedDbPath = join(homedir(), ".config", "swarm-tools", "swarm.db");
+    // Verify database file exists at the resolved (override) location
+    const expectedDbPath = getDatabasePath();
+    expect(process.env.SWARM_DB_PATH).toBeTruthy();
+    expect(expectedDbPath).toBe(process.env.SWARM_DB_PATH);
     expect(existsSync(expectedDbPath)).toBe(true);
   });
 
   it("appendEvent increments sequence number", async () => {
     const projectPath = "/tmp/test-persistence";
-    
+
     const event1 = createEvent("agent_registered", {
       project_key: "test-project",
       agent_name: "Agent1",
@@ -1766,9 +1783,12 @@ describe("appendEvent persistence to libSQL", () => {
 
     // Sequence should increment
     expect(result2.sequence).toBe(result1.sequence + 1);
-    
+
     // Both events should be in database
-    const allEvents = await readEvents({ projectKey: "test-project" }, projectPath);
+    const allEvents = await readEvents(
+      { projectKey: "test-project" },
+      projectPath,
+    );
     expect(allEvents).toHaveLength(2);
   });
 });

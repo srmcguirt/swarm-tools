@@ -102,8 +102,6 @@ export interface SearchOptions {
 export interface SessionStats {
 	/** Total number of sessions indexed */
 	readonly total_sessions: number;
-	/** Total number of chunks indexed */
-	readonly total_chunks: number;
 	/** Statistics grouped by agent type */
 	readonly by_agent: Record<
 		string,
@@ -413,7 +411,6 @@ export class SessionIndexer {
 
 			return {
 				total_sessions: 0, // Would count unique session_ids
-				total_chunks: stats.memories,
 				by_agent,
 			};
 		});

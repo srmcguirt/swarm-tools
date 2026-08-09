@@ -79,10 +79,7 @@ import {
   canUseWorktreeIsolation,
   getStartCommit,
 } from "./swarm-worktree";
-import {
-  isReviewApproved,
-  getReviewStatus,
-} from "./swarm-review";
+import { getReviewStatus } from "./swarm-review";
 import { getGitCommitInfo } from "./utils/git-commit-info";
 import { captureCoordinatorEvent, type EvalRecord } from "./eval-capture.js";
 import { formatResearcherPrompt } from "./swarm-prompts";
@@ -974,7 +971,7 @@ export const swarm_broadcast = tool({
  */
 export const swarm_complete = tool({
   description:
-    "Mark subtask complete with Verification Gate. REQUIRED: project_key, agent_name, bead_id (from your task assignment), summary, start_time (Date.now() from when you started). Before calling: 1) hivemind_store your learnings, 2) list files_touched for verification. Runs typecheck/tests before finalizing.",
+    "Mark subtask complete with Verification Gate. REQUIRED: project_key, agent_name, bead_id (from your task assignment), summary. OPTIONAL but recommended: start_time (Date.now() from when you started) for accurate duration analytics. Before calling: 1) hivemind_store your learnings, 2) list files_touched for verification. Runs typecheck/tests before finalizing.",
   args: {
     project_key: tool.schema.string().describe("Project path (e.g., '/Users/name/project')"),
     agent_name: tool.schema.string().describe("Your agent name from swarmmail_init"),
@@ -1000,7 +997,8 @@ export const swarm_complete = tool({
       .describe("Files that were originally planned to be modified"),
     start_time: tool.schema
       .number()
-      .describe("Task start timestamp (Unix ms) for duration calculation - REQUIRED for accurate analytics"),
+      .optional()
+      .describe("Task start timestamp (Unix ms, e.g. Date.now() from when you started). Optional - improves duration analytics but completion succeeds without it."),
     error_count: tool.schema
       .number()
       .optional()
@@ -1035,13 +1033,12 @@ export const swarm_complete = tool({
     if (!args.project_key) missing.push("project_key");
     if (!args.agent_name) missing.push("agent_name");
     if (!args.summary) missing.push("summary");
-    if (args.start_time === undefined) missing.push("start_time");
 
     if (missing.length > 0) {
       return JSON.stringify({
         success: false,
         error: `Missing required parameters: ${missing.join(", ")}`,
-        hint: "swarm_complete marks a subtask as done. All parameters are required.",
+        hint: "swarm_complete marks a subtask as done. project_key, agent_name, bead_id, and summary are required.",
         example: {
           project_key: "/path/to/project",
           agent_name: "your-agent-name",
@@ -1061,7 +1058,10 @@ export const swarm_complete = tool({
 
     // Check review gate (unless skipped) - BEFORE try block so errors are clear
     if (!args.skip_review) {
-      const reviewStatusResult = getReviewStatus(args.bead_id);
+      const reviewStatusResult = await getReviewStatus(
+        args.project_key,
+        args.bead_id
+      );
 
       if (!reviewStatusResult.approved) {
         // Check if review was even attempted
@@ -1394,8 +1394,8 @@ This will be recorded as a negative learning signal.`;
       }
 
       // Emit SubtaskOutcomeEvent for learning system
-      // start_time is now required, so we can calculate duration directly
-      const completionDurationMs = Date.now() - args.start_time;
+      // start_time is optional - fall back to 0 duration when the caller didn't supply one
+      const completionDurationMs = args.start_time !== undefined ? Date.now() - args.start_time : 0;
       
       // Determine epic ID: use parent_id if available, otherwise fall back to extracting from bead_id
       // (New hive cell IDs don't follow epicId.subtaskNum pattern - they're independent IDs)

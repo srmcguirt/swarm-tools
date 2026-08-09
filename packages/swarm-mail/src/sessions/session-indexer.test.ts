@@ -266,9 +266,8 @@ describe("SessionIndexer", () => {
 			// Act: Get statistics
 			const stats = await Effect.runPromise(indexer.getStats());
 
-			// Assert: Should return chunk counts
+			// Assert: Should return per-agent counts
 			// Note: total_sessions is 0 (TODO: needs unique session_id counting)
-			expect(stats.total_chunks).toBeGreaterThan(0);
 			expect(stats.by_agent).toBeDefined();
 			expect(stats.by_agent["opencode-swarm"]).toBeDefined();
 		});

@@ -5,8 +5,21 @@
  * Following the same pattern as hive/jsonl.ts
  */
 
-import { describe, test, expect, beforeEach, beforeAll, afterAll } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import {
+  describe,
+  test,
+  expect,
+  beforeEach,
+  beforeAll,
+  afterAll,
+} from "bun:test";
+import {
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createTestLibSQLDb } from "../test-libsql.js";
@@ -64,7 +77,9 @@ describe("Memory Sync", () => {
       const parsed = JSON.parse(line);
 
       expect(parsed.id).toBe("mem-abc123");
-      expect(parsed.information).toBe("OAuth tokens need 5min buffer before expiry");
+      expect(parsed.information).toBe(
+        "OAuth tokens need 5min buffer before expiry",
+      );
       expect(parsed.confidence).toBe(0.9);
     });
 
@@ -92,7 +107,8 @@ describe("Memory Sync", () => {
     });
 
     test("parses single line", () => {
-      const jsonl = '{"id":"mem-1","information":"test","created_at":"2024-12-19T00:00:00.000Z"}';
+      const jsonl =
+        '{"id":"mem-1","information":"test","created_at":"2024-12-19T00:00:00.000Z"}';
       const result = parseMemoryJSONL(jsonl);
 
       expect(result).toHaveLength(1);
@@ -152,7 +168,7 @@ describe("Memory Sync", () => {
           JSON.stringify({ tags: ["test", "export"], confidence: 0.85 }),
           "default",
           new Date().toISOString(),
-        ]
+        ],
       );
 
       const result = await exportMemories(db);
@@ -173,12 +189,24 @@ describe("Memory Sync", () => {
       await db.query(
         `INSERT INTO memories (id, content, metadata, collection, created_at)
          VALUES ($1, $2, $3, $4, $5)`,
-        ["mem-coll-a", "Collection A memory", "{}", "collection-a", new Date().toISOString()]
+        [
+          "mem-coll-a",
+          "Collection A memory",
+          "{}",
+          "collection-a",
+          new Date().toISOString(),
+        ],
       );
       await db.query(
         `INSERT INTO memories (id, content, metadata, collection, created_at)
          VALUES ($1, $2, $3, $4, $5)`,
-        ["mem-coll-b", "Collection B memory", "{}", "collection-b", new Date().toISOString()]
+        [
+          "mem-coll-b",
+          "Collection B memory",
+          "{}",
+          "collection-b",
+          new Date().toISOString(),
+        ],
       );
 
       const result = await exportMemories(db, { collection: "collection-a" });
@@ -195,7 +223,14 @@ describe("Memory Sync", () => {
       await db.query(
         `INSERT INTO memories (id, content, metadata, collection, created_at, embedding)
          VALUES ($1, $2, $3, $4, $5, vector($6))`,
-        ["mem-with-embed", "Memory with embedding", "{}", "default", new Date().toISOString(), JSON.stringify(Array.from(embedding))]
+        [
+          "mem-with-embed",
+          "Memory with embedding",
+          "{}",
+          "default",
+          new Date().toISOString(),
+          JSON.stringify(Array.from(embedding)),
+        ],
       );
 
       const result = await exportMemories(db);
@@ -238,7 +273,7 @@ describe("Memory Sync", () => {
       // Verify in database
       const dbResult = await db.query<{ id: string; content: string }>(
         "SELECT id, content FROM memories WHERE id = $1",
-        ["mem-import-new"]
+        ["mem-import-new"],
       );
       expect(dbResult.rows).toHaveLength(1);
       expect(dbResult.rows[0].content).toBe("Imported memory");
@@ -267,9 +302,39 @@ describe("Memory Sync", () => {
       // Verify original content preserved
       const dbResult = await db.query<{ content: string }>(
         "SELECT content FROM memories WHERE id = $1",
-        ["mem-dupe-test"]
+        ["mem-dupe-test"],
       );
       expect(dbResult.rows[0].content).toBe("Original");
+    });
+
+    test("skips duplicate content even when IDs differ (id churn guard)", async () => {
+      // Simulates: hivemind_store mints a fresh random id on every call, so
+      // rehydrating memories from a JSONL after a DB wipe produces new ids
+      // for the same content. A later sync must not re-insert those rows
+      // just because the old ids in the JSONL don't match the new ones.
+      const jsonl = JSON.stringify({
+        id: "mem-original-id",
+        information: "Duplicate content example",
+        created_at: "2024-12-19T00:00:00.000Z",
+      });
+      await importMemories(db, jsonl);
+
+      // Rehydrated copy: same content, brand-new id (as hivemind_store would mint)
+      const jsonl2 = JSON.stringify({
+        id: "mem-freshly-minted-id",
+        information: "Duplicate content example",
+        created_at: "2024-12-19T00:00:00.000Z",
+      });
+      const result = await importMemories(db, jsonl2);
+
+      expect(result.created).toBe(0);
+      expect(result.skipped).toBe(1);
+
+      const dbResult = await db.query<{ id: string }>(
+        "SELECT id FROM memories WHERE content = $1",
+        ["Duplicate content example"],
+      );
+      expect(dbResult.rows).toHaveLength(1);
     });
 
     test("imports multiple memories", async () => {
@@ -313,7 +378,7 @@ describe("Memory Sync", () => {
 
       const dbResult = await db.query<{ metadata: string }>(
         "SELECT metadata FROM memories WHERE id = $1",
-        ["mem-meta-import"]
+        ["mem-meta-import"],
       );
       // libSQL returns JSON as TEXT string - always parse
       const metadata = JSON.parse(dbResult.rows[0].metadata);
@@ -349,7 +414,13 @@ describe("Memory Sync", () => {
         `INSERT INTO memories (id, content, metadata, collection, created_at)
          VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (id) DO NOTHING`,
-        ["mem-sync-create", "Sync test memory", "{}", "default", new Date().toISOString()]
+        [
+          "mem-sync-create",
+          "Sync test memory",
+          "{}",
+          "default",
+          new Date().toISOString(),
+        ],
       );
 
       await syncMemories(db, syncHiveDir);
@@ -375,7 +446,7 @@ describe("Memory Sync", () => {
       // Verify imported
       const dbResult = await db.query<{ id: string }>(
         "SELECT id FROM memories WHERE id = $1",
-        ["mem-from-file"]
+        ["mem-from-file"],
       );
       expect(dbResult.rows).toHaveLength(1);
     });
@@ -388,7 +459,13 @@ describe("Memory Sync", () => {
         `INSERT INTO memories (id, content, metadata, collection, created_at)
          VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (id) DO NOTHING`,
-        ["mem-db-only", "Only in database", "{}", "default", new Date().toISOString()]
+        [
+          "mem-db-only",
+          "Only in database",
+          "{}",
+          "default",
+          new Date().toISOString(),
+        ],
       );
 
       // Memory only in file
@@ -402,8 +479,14 @@ describe("Memory Sync", () => {
       await syncMemories(db, syncHiveDir);
 
       // Both should now be in DB
-      const dbOnlyResult = await db.query("SELECT id FROM memories WHERE id = $1", ["mem-db-only"]);
-      const fileOnlyResult = await db.query("SELECT id FROM memories WHERE id = $1", ["mem-file-only"]);
+      const dbOnlyResult = await db.query(
+        "SELECT id FROM memories WHERE id = $1",
+        ["mem-db-only"],
+      );
+      const fileOnlyResult = await db.query(
+        "SELECT id FROM memories WHERE id = $1",
+        ["mem-file-only"],
+      );
       expect(dbOnlyResult.rows).toHaveLength(1);
       expect(fileOnlyResult.rows).toHaveLength(1);
 
@@ -411,6 +494,132 @@ describe("Memory Sync", () => {
       const content = readFileSync(memoriesPath, "utf-8");
       expect(content).toContain("mem-db-only");
       expect(content).toContain("mem-file-only");
+    });
+  });
+
+  // ==========================================================================
+  // Export Sanitization Tests
+  // ==========================================================================
+
+  describe("syncMemories — export sanitization", () => {
+    const sanitizeTestDir = join(TEST_DIR, "sanitize-test");
+    const sanitizeHiveDir = join(sanitizeTestDir, ".hive");
+
+    beforeAll(() => {
+      mkdirSync(sanitizeHiveDir, { recursive: true });
+    });
+
+    test("internal process vocabulary is stripped from the git-tracked file", async () => {
+      const memoriesPath = join(sanitizeHiveDir, "memories.jsonl");
+      if (existsSync(memoriesPath)) rmSync(memoriesPath);
+
+      await db.query(
+        `INSERT INTO memories (id, content, metadata, collection, created_at)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          "mem-vocab-strip",
+          "The worker fixed the memory leak. The swarm scaffolded 61 packages. See `swarm_complete` for details.",
+          "{}",
+          "default",
+          new Date().toISOString(),
+        ],
+      );
+
+      await syncMemories(db, sanitizeHiveDir);
+
+      const content = readFileSync(memoriesPath, "utf-8");
+      expect(content).not.toMatch(/\bworker\b/i);
+      expect(content).not.toMatch(/\bswarm\b(?!_complete)/i);
+      // technical fact (command in a code span) survives untouched
+      expect(content).toContain("swarm_complete");
+      expect(content).toContain("61 packages");
+    });
+
+    test("technical facts (file paths, measurements) survive sanitization", async () => {
+      const memoriesPath = join(sanitizeHiveDir, "memories.jsonl");
+      if (existsSync(memoriesPath)) rmSync(memoriesPath);
+
+      await db.query(
+        `INSERT INTO memories (id, content, metadata, collection, created_at)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          "mem-facts-survive",
+          "The coordinator spawned a subtask to fix the SQL injection in packages/swarm-mail/src/hive/jsonl.ts. Reproduced in 4.2s.",
+          "{}",
+          "default",
+          new Date().toISOString(),
+        ],
+      );
+
+      await syncMemories(db, sanitizeHiveDir);
+
+      const content = readFileSync(memoriesPath, "utf-8");
+      expect(content).toContain("packages/swarm-mail/src/hive/jsonl.ts");
+      expect(content).toContain("4.2s");
+      expect(content).not.toMatch(/\bcoordinator\b/i);
+      expect(content).not.toMatch(/\bsubtask\b/i);
+    });
+
+    test("running sync twice on the same memory produces the same sanitized line (idempotent)", async () => {
+      const memoriesPath = join(sanitizeHiveDir, "memories.jsonl");
+      if (existsSync(memoriesPath)) rmSync(memoriesPath);
+
+      await db.query(
+        `INSERT INTO memories (id, content, metadata, collection, created_at)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          "mem-idempotent",
+          "The worker agent fixed the bug. The swarm coordinator verified it.",
+          "{}",
+          "default",
+          new Date().toISOString(),
+        ],
+      );
+
+      await syncMemories(db, sanitizeHiveDir);
+      const firstPass = readFileSync(memoriesPath, "utf-8");
+
+      await syncMemories(db, sanitizeHiveDir);
+      const secondPass = readFileSync(memoriesPath, "utf-8");
+
+      expect(secondPass).toBe(firstPass);
+    });
+
+    test("local DB row content is never mutated by export sanitization", async () => {
+      const memoriesPath = join(sanitizeHiveDir, "memories.jsonl");
+      if (existsSync(memoriesPath)) rmSync(memoriesPath);
+
+      const rawContent =
+        "The worker agent fixed the bug. The swarm coordinator verified it via swarm_complete.";
+
+      await db.query(
+        `INSERT INTO memories (id, content, metadata, collection, created_at)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          "mem-db-unmutated",
+          rawContent,
+          "{}",
+          "default",
+          new Date().toISOString(),
+        ],
+      );
+
+      await syncMemories(db, sanitizeHiveDir);
+      await syncMemories(db, sanitizeHiveDir); // twice, to also cover the self-import round trip
+
+      const dbResult = await db.query<{ content: string }>(
+        "SELECT content FROM memories WHERE id = $1",
+        ["mem-db-unmutated"],
+      );
+
+      // DB row is byte-for-byte the original, unsanitized text — the
+      // export transform only ever touches the on-disk copy.
+      expect(dbResult.rows[0].content).toBe(rawContent);
+
+      // Meanwhile the file *is* sanitized.
+      const content = readFileSync(memoriesPath, "utf-8");
+      expect(content).not.toMatch(/\bworker\b/i);
+      expect(content).not.toMatch(/\bcoordinator\b/i);
     });
   });
 });

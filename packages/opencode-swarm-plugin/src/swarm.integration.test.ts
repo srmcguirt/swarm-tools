@@ -2340,7 +2340,7 @@ describe("Contract Validation", () => {
     it("returns success: true, not error, when review not approved", async () => {
       const testProjectPath = "/tmp/swarm-review-not-approved-test-" + Date.now();
       const { getHiveAdapter } = await import("./hive");
-      const { markReviewRejected } = await import("./swarm-review");
+      const { swarm_review_feedback } = await import("./swarm-review");
       const adapter = await getHiveAdapter(testProjectPath);
 
       // Create a task cell directly
@@ -2355,9 +2355,21 @@ describe("Contract Validation", () => {
         status: "in_progress",
       });
 
-      // Manually set review status to rejected (approved: false, but reviewed: true)
-      // This simulates the review gate detecting a review was done but not approved
-      markReviewRejected(cell.id);
+      // Drive a real rejection through swarm_review_feedback (approved:
+      // false, but reviewed: true) - review status is event-sourced now,
+      // so there's no synthetic setter to fake this state with.
+      await swarm_review_feedback.execute(
+        {
+          project_key: testProjectPath,
+          task_id: cell.id,
+          worker_id: "TestWorker",
+          status: "needs_changes",
+          issues: JSON.stringify([
+            { file: "test.ts", issue: "needs work" },
+          ]),
+        },
+        mockContext,
+      );
 
       // Try to complete with review not approved
       const result = await swarm_complete.execute(

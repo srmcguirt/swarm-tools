@@ -6,8 +6,23 @@
  */
 
 import { createClient } from "@libsql/client";
-import { beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
+import { sql } from "drizzle-orm";
+import type { SwarmDb } from "../db/client.js";
 import { createDrizzleClient } from "../db/drizzle.js";
+import { memories } from "../db/schema/memory.js";
+import {
+  createInMemorySwarmMailLibSQL,
+  toSwarmDb,
+} from "../libsql.convenience.js";
+import type { SwarmMailAdapter } from "../types/adapter.js";
 import { type Memory, createMemoryStore } from "./store.js";
 
 /**
@@ -49,7 +64,9 @@ describe("Memory Store (Drizzle) - Basic Operations", () => {
         access_count TEXT DEFAULT '0',
         last_accessed TEXT DEFAULT (datetime('now')),
         category TEXT,
-        status TEXT DEFAULT 'active'
+        status TEXT DEFAULT 'active',
+        repo_key TEXT,
+        package_key TEXT
       )
     `);
 
@@ -253,7 +270,9 @@ describe("Memory Store (Drizzle) - Vector Search", () => {
         access_count TEXT DEFAULT '0',
         last_accessed TEXT DEFAULT (datetime('now')),
         category TEXT,
-        status TEXT DEFAULT 'active'
+        status TEXT DEFAULT 'active',
+        repo_key TEXT,
+        package_key TEXT
       )
     `);
 
@@ -297,7 +316,7 @@ describe("Memory Store (Drizzle) - Vector Search", () => {
           collection: mem.collection,
           createdAt: new Date(),
         },
-        mem.embedding
+        mem.embedding,
       );
     }
   });
@@ -357,5 +376,230 @@ describe("Memory Store (Drizzle) - Vector Search", () => {
 
     const results = await store.search(mockEmbedding(1));
     expect(results).toEqual([]);
+  });
+});
+
+describe("Memory Store (Drizzle) - Status Corruption Regression", () => {
+  // Regression test for a bug where the Drizzle schema's column default
+  // (db/schema/memory.ts `status: text("status").default("'active'")`) contained
+  // literal quote characters. Drizzle's SQLite dialect binds `.default()` as a
+  // client-side insert parameter whenever a column is omitted from `.values()`,
+  // so every memory silently got a `status` of the 8-char string `'active'`
+  // instead of `active` - independent of what the table's raw SQL DDL default said.
+  // search()/ftsSearch() filtered on `status = 'active'`, which never matched,
+  // so every memory became permanently unsearchable while getStats() still
+  // reported a healthy count. Store succeeded, search returned empty: silent
+  // write-only corruption with stats showing everything was fine.
+  let swarmMail: SwarmMailAdapter;
+  let db: SwarmDb;
+  let store: ReturnType<typeof createMemoryStore>;
+
+  beforeAll(async () => {
+    swarmMail = await createInMemorySwarmMailLibSQL(
+      "status-corruption-regression",
+    );
+    const dbAdapter = await swarmMail.getDatabase();
+    db = toSwarmDb(dbAdapter);
+    store = createMemoryStore(db);
+  });
+
+  afterAll(async () => {
+    await swarmMail.close();
+  });
+
+  test("store() writes a clean 'active' status, not a quoted literal", async () => {
+    const memory: Memory = {
+      id: "mem-status-1",
+      content: "Some content",
+      metadata: {},
+      collection: "default",
+      createdAt: new Date(),
+    };
+
+    await store.store(memory, mockEmbedding(1));
+
+    const rows = await db.all<{ status: string }>(
+      sql`SELECT status FROM memories WHERE id = ${memory.id}`,
+    );
+    expect(rows[0]?.status).toBe("active");
+  });
+
+  test("a freshly stored memory is retrievable via search() (end-to-end)", async () => {
+    const memory: Memory = {
+      id: "mem-status-2",
+      content: "Findable content about durable fixes",
+      metadata: {},
+      collection: "default",
+      createdAt: new Date(),
+    };
+    const embedding = mockEmbedding(7);
+
+    await store.store(memory, embedding);
+
+    const results = await store.search(embedding, { threshold: 0 });
+    expect(results.map((r) => r.memory.id)).toContain("mem-status-2");
+  });
+
+  test("a freshly stored memory is retrievable via ftsSearch() (end-to-end)", async () => {
+    const memory: Memory = {
+      id: "mem-status-3",
+      content: "unique-fts-marker-zzyzx durable fixes",
+      metadata: {},
+      collection: "default",
+      createdAt: new Date(),
+    };
+
+    await store.store(memory, mockEmbedding(8));
+
+    const results = await store.ftsSearch("unique-fts-marker-zzyzx");
+    expect(results.map((r) => r.memory.id)).toContain("mem-status-3");
+  });
+
+  test("search() still finds legacy-corrupted rows (status = literal 'active')", async () => {
+    // Simulates a row written by an unpatched install before this fix, so
+    // memories already in production databases remain searchable.
+    const memory: Memory = {
+      id: "mem-legacy",
+      content: "Legacy corrupted row",
+      metadata: {},
+      collection: "default",
+      createdAt: new Date(),
+    };
+    await store.store(memory, mockEmbedding(3));
+
+    // Force the legacy-corrupted value directly, bypassing the (now-fixed) default.
+    await db.run(
+      sql`UPDATE memories SET status = '''active''' WHERE id = ${memory.id}`,
+    );
+
+    const results = await store.search(mockEmbedding(3), { threshold: 0 });
+    expect(results.map((r) => r.memory.id)).toContain("mem-legacy");
+  });
+
+  test("ftsSearch() still finds legacy-corrupted rows (status = literal 'active')", async () => {
+    // Mirrors the search() legacy-status test above: ftsSearch() has its own
+    // end-to-end query path and status filter, so it needs its own coverage
+    // of the corrupted-status case rather than inheriting search()'s.
+    const memory: Memory = {
+      id: "mem-legacy-fts",
+      content: "unique-fts-marker-legacy durable fixes",
+      metadata: {},
+      collection: "default",
+      createdAt: new Date(),
+    };
+    await store.store(memory, mockEmbedding(9));
+
+    // Force the legacy-corrupted value directly, bypassing the (now-fixed) default.
+    await db.run(
+      sql`UPDATE memories SET status = '''active''' WHERE id = ${memory.id}`,
+    );
+
+    const results = await store.ftsSearch("unique-fts-marker-legacy");
+    expect(results.map((r) => r.memory.id)).toContain("mem-legacy-fts");
+  });
+});
+
+describe("Memory Store (Drizzle) - Default Value Corruption Regression", () => {
+  // Regression tests for the same class of bug fixed for `status` in
+  // db/schema/memory.ts: Drizzle's SQLite dialect binds `.default()` as a
+  // client-side insert parameter whenever a column is omitted from
+  // `.values()`, independent of the raw SQL DDL default. Two distinct
+  // corruption patterns existed:
+  //
+  // Class A (metadata, collection, tags): the JS default string itself
+  // contained literal single-quote characters (e.g. `"'{}'"` instead of
+  // `"{}"`), so the quotes got written into the column as data.
+  //
+  // Class B (created_at, updated_at, last_accessed): the default was a raw
+  // SQL expression string (`"(datetime('now'))"`) not wrapped in Drizzle's
+  // `sql` tag, so it was bound as a literal 20-character string rather than
+  // evaluated as an expression - the timestamp columns held the text
+  // "(datetime('now'))" instead of an actual datetime.
+  //
+  // store() explicitly sets metadata/collection/created_at, so those never
+  // hit the bug in current usage (dead but still worth fixing - a trap for
+  // the next column omission). tags/updated_at/last_accessed are omitted by
+  // store() on every call, so those corrupt every row in production.
+  let swarmMail: SwarmMailAdapter;
+  let db: SwarmDb;
+  let store: ReturnType<typeof createMemoryStore>;
+
+  beforeAll(async () => {
+    swarmMail = await createInMemorySwarmMailLibSQL(
+      "default-value-corruption-regression",
+    );
+    const dbAdapter = await swarmMail.getDatabase();
+    db = toSwarmDb(dbAdapter);
+    store = createMemoryStore(db);
+  });
+
+  afterAll(async () => {
+    await swarmMail.close();
+  });
+
+  test("store() writes clean tags/updated_at/last_accessed defaults (columns store() omits on every call)", async () => {
+    const memory: Memory = {
+      id: "mem-default-live",
+      content: "Some content",
+      metadata: {},
+      collection: "default",
+      createdAt: new Date(),
+    };
+
+    await store.store(memory, mockEmbedding(1));
+
+    const rows = await db.all<{
+      tags: string;
+      updated_at: string;
+      last_accessed: string;
+    }>(
+      sql`SELECT tags, updated_at, last_accessed FROM memories WHERE id = ${memory.id}`,
+    );
+
+    expect(rows[0]?.tags).toBe("[]");
+    expect(rows[0]?.tags).not.toContain("'");
+
+    expect(rows[0]?.updated_at).not.toBe("(datetime('now'))");
+    expect(new Date(rows[0]!.updated_at).toString()).not.toBe("Invalid Date");
+
+    expect(rows[0]?.last_accessed).not.toBe("(datetime('now'))");
+    expect(new Date(rows[0]!.last_accessed).toString()).not.toBe(
+      "Invalid Date",
+    );
+  });
+
+  test("a direct Drizzle insert omitting all defaulted columns writes clean values, not quoted literals or raw SQL text", async () => {
+    // Bypasses store() (which sets metadata/collection/created_at explicitly)
+    // to exercise every defaulted column's client-side binding directly -
+    // this is what a raw `db.insert(memories).values({id, content})` call
+    // (e.g. from a migration or future call site) would actually produce.
+    await db.insert(memories).values({
+      id: "mem-default-raw-insert",
+      content: "Raw insert content",
+    });
+
+    const rows = await db.all<{
+      metadata: string;
+      collection: string;
+      tags: string;
+      created_at: string;
+      updated_at: string;
+      last_accessed: string;
+    }>(
+      sql`SELECT metadata, collection, tags, created_at, updated_at, last_accessed FROM memories WHERE id = ${"mem-default-raw-insert"}`,
+    );
+    const row = rows[0]!;
+
+    // Class A: no literal quote characters leaking into the stored value.
+    expect(row.metadata).toBe("{}");
+    expect(row.collection).toBe("default");
+    expect(row.tags).toBe("[]");
+
+    // Class B: a real, parseable datetime - not the raw SQL text.
+    for (const col of ["created_at", "updated_at", "last_accessed"] as const) {
+      const value = row[col];
+      expect(value).not.toBe("(datetime('now'))");
+      expect(new Date(value).toString()).not.toBe("Invalid Date");
+    }
   });
 });

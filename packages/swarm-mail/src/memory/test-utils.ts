@@ -83,7 +83,9 @@ export async function createTestMemoryDb(): Promise<{
       access_count TEXT DEFAULT '0',
       last_accessed TEXT DEFAULT (datetime('now')),
       category TEXT,
-      status TEXT DEFAULT 'active'
+      status TEXT DEFAULT 'active',
+      repo_key TEXT,
+      package_key TEXT
     )
   `);
 

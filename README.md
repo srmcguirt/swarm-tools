@@ -25,7 +25,7 @@ Break big tasks into small ones. Spawn agents to work in parallel. Learn from wh
 ### OpenCode
 
 ```bash
-npm install -g opencode-swarm-plugin
+bun add -g opencode-swarm-plugin@npm:@srmcguirt/opencode-swarm-plugin@latest
 swarm setup
 ```
 
@@ -36,7 +36,7 @@ Done. Use `/swarm "your task"` in any OpenCode session.
 **Step 1:** Install the CLI globally (required):
 
 ```bash
-npm install -g opencode-swarm-plugin
+bun add -g opencode-swarm-plugin@npm:@srmcguirt/opencode-swarm-plugin@latest
 ```
 
 **Step 2:** Add the marketplace in Claude Code:

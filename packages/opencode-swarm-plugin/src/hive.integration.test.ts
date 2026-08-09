@@ -6,7 +6,15 @@
  *
  * Run with: bun test src/hive.integration.test.ts
  */
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  beforeEach,
+  afterAll,
+  afterEach,
+} from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -86,10 +94,10 @@ describe("beads integration", () => {
   beforeAll(async () => {
     // Clear cached adapters from previous test runs
     clearHiveAdapterCache();
-    
+
     // Set working directory for beads commands
     setBeadsWorkingDirectory(TEST_PROJECT_KEY);
-    
+
     // Get adapter instance for verification
     adapter = await getBeadsAdapter(TEST_PROJECT_KEY);
   });
@@ -348,7 +356,8 @@ describe("beads integration", () => {
         {
           id: created.id,
           reason: "Task completed",
-          result: "Implemented the feature with full test coverage. Added 3 new endpoints and updated the schema.",
+          result:
+            "Implemented the feature with full test coverage. Added 3 new endpoints and updated the schema.",
         },
         mockContext,
       );
@@ -444,59 +453,102 @@ describe("beads integration", () => {
   });
 
   describe("hive_create_epic", () => {
-    it("creates an epic with subtasks and syncs to JSONL", async () => {
-      const result = await hive_create_epic.execute(
-        {
-          epic_title: "Integration test epic",
-          epic_description: "Testing epic creation",
-          subtasks: [
-            { title: "Subtask 1", priority: 2 },
-            { title: "Subtask 2", priority: 3 },
-            { title: "Subtask 3", priority: 1 },
-          ],
-        },
-        mockContext,
+    it("creates an epic with subtasks and syncs to the hive-data mirror (never the working repo)", async () => {
+      const { mkdirSync, rmSync, existsSync, readFileSync } = await import(
+        "node:fs"
+      );
+      const { tmpdir } = await import("node:os");
+      const { execSync } = await import("node:child_process");
+      const { resolveHiveDataSlug, hiveDataProjectDir } = await import(
+        "swarm-mail"
       );
 
-      const epicResult = parseResponse<EpicCreateResult>(result);
-      createdBeadIds.push(epicResult.epic.id);
-      for (const subtask of epicResult.subtasks) {
-        createdBeadIds.push(subtask.id);
-      }
+      // Isolated hive-data fixture — the file-level default from
+      // test-preload.ts is deliberately a bogus non-git path, so this
+      // test must supply its own to exercise the real flush.
+      const hiveDataLocal = join(
+        tmpdir(),
+        `hive-create-epic-hive-data-${Date.now()}`,
+      );
+      mkdirSync(hiveDataLocal, { recursive: true });
+      execSync("git init -b main", { cwd: hiveDataLocal });
+      execSync('git config user.email "test@example.com"', {
+        cwd: hiveDataLocal,
+      });
+      execSync('git config user.name "Test User"', { cwd: hiveDataLocal });
+      execSync("git commit --allow-empty -m initial", { cwd: hiveDataLocal });
 
-      expect(epicResult.success).toBe(true);
-      expect(epicResult.epic.title).toBe("Integration test epic");
-      expect(epicResult.epic.issue_type).toBe("epic");
-      expect(epicResult.subtasks).toHaveLength(3);
+      const originalHiveDataRepo = process.env.HIVE_DATA_REPO;
+      process.env.HIVE_DATA_REPO = hiveDataLocal;
 
-      // Subtasks should have parent_id pointing to epic
-      // Verify via adapter since parent_id may not be in the output schema
-      for (const subtask of epicResult.subtasks) {
-        const subtaskBead = await adapter.getCell(TEST_PROJECT_KEY, subtask.id);
-        expect(subtaskBead).toBeDefined();
-        expect(subtaskBead!.parent_id).toBe(epicResult.epic.id);
-      }
-      
-      // NEW TEST: Verify cells are synced to JSONL immediately
-      const { readFileSync, existsSync } = await import("node:fs");
-      const { join } = await import("node:path");
-      const jsonlPath = join(TEST_PROJECT_KEY, ".hive", "issues.jsonl");
-      
-      expect(existsSync(jsonlPath)).toBe(true);
-      
-      const jsonlContent = readFileSync(jsonlPath, "utf-8");
-      const lines = jsonlContent.trim().split("\n").filter(l => l);
-      const cells = lines.map(line => JSON.parse(line));
-      
-      // Epic and all subtasks should be in JSONL
-      const epicInJsonl = cells.find(c => c.id === epicResult.epic.id);
-      expect(epicInJsonl).toBeDefined();
-      expect(epicInJsonl!.title).toBe("Integration test epic");
-      
-      for (const subtask of epicResult.subtasks) {
-        const subtaskInJsonl = cells.find(c => c.id === subtask.id);
-        expect(subtaskInJsonl).toBeDefined();
-        expect(subtaskInJsonl!.parent_id).toBe(epicResult.epic.id);
+      try {
+        const result = await hive_create_epic.execute(
+          {
+            epic_title: "Integration test epic",
+            epic_description: "Testing epic creation",
+            subtasks: [
+              { title: "Subtask 1", priority: 2 },
+              { title: "Subtask 2", priority: 3 },
+              { title: "Subtask 3", priority: 1 },
+            ],
+          },
+          mockContext,
+        );
+
+        const epicResult = parseResponse<EpicCreateResult>(result);
+        createdBeadIds.push(epicResult.epic.id);
+        for (const subtask of epicResult.subtasks) {
+          createdBeadIds.push(subtask.id);
+        }
+
+        expect(epicResult.success).toBe(true);
+        expect(epicResult.epic.title).toBe("Integration test epic");
+        expect(epicResult.epic.issue_type).toBe("epic");
+        expect(epicResult.subtasks).toHaveLength(3);
+
+        // Subtasks should have parent_id pointing to epic
+        // Verify via adapter since parent_id may not be in the output schema
+        for (const subtask of epicResult.subtasks) {
+          const subtaskBead = await adapter.getCell(
+            TEST_PROJECT_KEY,
+            subtask.id,
+          );
+          expect(subtaskBead).toBeDefined();
+          expect(subtaskBead!.parent_id).toBe(epicResult.epic.id);
+        }
+
+        // Cells are synced to the hive-data mirror, not the working repo.
+        expect(existsSync(join(TEST_PROJECT_KEY, ".hive"))).toBe(false);
+
+        const slug = await resolveHiveDataSlug(TEST_PROJECT_KEY);
+        const syncDir = hiveDataProjectDir(hiveDataLocal, slug);
+        const jsonlPath = join(syncDir, "issues.jsonl");
+        expect(existsSync(jsonlPath)).toBe(true);
+
+        const jsonlContent = readFileSync(jsonlPath, "utf-8");
+        const lines = jsonlContent
+          .trim()
+          .split("\n")
+          .filter((l) => l);
+        const cells = lines.map((line) => JSON.parse(line));
+
+        // Epic and all subtasks should be in the hive-data JSONL
+        const epicInJsonl = cells.find((c) => c.id === epicResult.epic.id);
+        expect(epicInJsonl).toBeDefined();
+        expect(epicInJsonl!.title).toBe("Integration test epic");
+
+        for (const subtask of epicResult.subtasks) {
+          const subtaskInJsonl = cells.find((c) => c.id === subtask.id);
+          expect(subtaskInJsonl).toBeDefined();
+          expect(subtaskInJsonl!.parent_id).toBe(epicResult.epic.id);
+        }
+      } finally {
+        if (originalHiveDataRepo === undefined) {
+          delete process.env.HIVE_DATA_REPO;
+        } else {
+          process.env.HIVE_DATA_REPO = originalHiveDataRepo;
+        }
+        rmSync(hiveDataLocal, { recursive: true, force: true });
       }
     });
 
@@ -589,16 +641,25 @@ describe("beads integration", () => {
       expect(epicResult.subtasks).toHaveLength(3);
 
       // Verify descriptions are persisted via adapter
-      const subtask1 = await adapter.getCell(TEST_PROJECT_KEY, epicResult.subtasks[0].id);
-      const subtask2 = await adapter.getCell(TEST_PROJECT_KEY, epicResult.subtasks[1].id);
-      const subtask3 = await adapter.getCell(TEST_PROJECT_KEY, epicResult.subtasks[2].id);
+      const subtask1 = await adapter.getCell(
+        TEST_PROJECT_KEY,
+        epicResult.subtasks[0].id,
+      );
+      const subtask2 = await adapter.getCell(
+        TEST_PROJECT_KEY,
+        epicResult.subtasks[1].id,
+      );
+      const subtask3 = await adapter.getCell(
+        TEST_PROJECT_KEY,
+        epicResult.subtasks[2].id,
+      );
 
       expect(subtask1).toBeDefined();
       expect(subtask1!.description).toBe("First task does X");
-      
+
       expect(subtask2).toBeDefined();
       expect(subtask2!.description).toBe("Second task does Y");
-      
+
       expect(subtask3).toBeDefined();
       // No description provided - should be undefined or empty
       expect(subtask3!.description).toBeFalsy();
@@ -719,7 +780,7 @@ describe("beads integration", () => {
       // Examples:
       //   "opencode-swarm-monorepo-lf2p4u-mjd2h5v4wdt" -> hash is "lf2p4u"
       //   "cell--gcel4-mjd2h5v4wdt" -> hash is "-gcel4" (negative hash creates consecutive hyphens)
-      
+
       // Find the last hyphen, then work backwards to find the second-to-last hyphen
       const lastHyphenIndex = fullId.lastIndexOf("-");
       if (lastHyphenIndex === -1) {
@@ -741,7 +802,7 @@ describe("beads integration", () => {
     it("short hashes work with all ID-taking tools", async () => {
       // Use last 6-8 chars of hash (or full hash if short)
       const shortHash = hash.substring(Math.max(0, hash.length - 8));
-      
+
       try {
         // Test hive_update
         await hive_update.execute(
@@ -752,7 +813,7 @@ describe("beads integration", () => {
         // Test hive_start
         await hive_start.execute({ id: shortHash }, mockContext);
 
-        // Test hive_close  
+        // Test hive_close
         const result = await hive_close.execute(
           { id: shortHash, reason: "Closed via short hash" },
           mockContext,
@@ -820,7 +881,8 @@ describe("beads integration", () => {
           await hive_update.execute({ id: "a", status: "closed" }, mockContext);
           // If it succeeds, it means only one cell matched - that's fine
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message =
+            error instanceof Error ? error.message : String(error);
           // Error should mention ambiguity if multiple matches
           if (message.includes("ambiguous") || message.includes("multiple")) {
             expect(message).toMatch(/ambiguous|multiple/i);
@@ -882,10 +944,7 @@ describe("beads integration", () => {
 
       it("resolves hash to full ID (or shows helpful error if ambiguous)", async () => {
         try {
-          const result = await hive_start.execute(
-            { id: hash },
-            mockContext,
-          );
+          const result = await hive_start.execute({ id: hash }, mockContext);
 
           expect(result).toContain("Started");
           expect(result).toContain(fullId);
@@ -986,7 +1045,10 @@ describe("beads integration", () => {
       expect(epicClosed!.status).toBe("closed");
 
       for (const subtask of epic.subtasks) {
-        const subtaskClosed = await adapter.getCell(TEST_PROJECT_KEY, subtask.id);
+        const subtaskClosed = await adapter.getCell(
+          TEST_PROJECT_KEY,
+          subtask.id,
+        );
         expect(subtaskClosed).toBeDefined();
         expect(subtaskClosed!.status).toBe("closed");
       }
@@ -999,19 +1061,22 @@ describe("beads integration", () => {
       const { mkdirSync, rmSync, writeFileSync } = await import("node:fs");
       const { join } = await import("node:path");
       const { tmpdir } = await import("node:os");
-      
+
       // Create temp project with .beads directory only
       const tempProject = join(tmpdir(), `hive-migration-test-${Date.now()}`);
       const beadsDir = join(tempProject, ".beads");
-      
+
       mkdirSync(beadsDir, { recursive: true });
-      writeFileSync(join(beadsDir, "issues.jsonl"), '{"id":"bd-test","title":"Test"}');
-      
+      writeFileSync(
+        join(beadsDir, "issues.jsonl"),
+        '{"id":"bd-test","title":"Test"}',
+      );
+
       const result = checkBeadsMigrationNeeded(tempProject);
-      
+
       expect(result.needed).toBe(true);
       expect(result.beadsPath).toBe(beadsDir);
-      
+
       // Cleanup
       rmSync(tempProject, { recursive: true, force: true });
     });
@@ -1021,75 +1086,82 @@ describe("beads integration", () => {
       const { mkdirSync, rmSync } = await import("node:fs");
       const { join } = await import("node:path");
       const { tmpdir } = await import("node:os");
-      
+
       // Create temp project with .hive directory
       const tempProject = join(tmpdir(), `hive-migration-test-${Date.now()}`);
       const hiveDir = join(tempProject, ".hive");
-      
+
       mkdirSync(hiveDir, { recursive: true });
-      
+
       const result = checkBeadsMigrationNeeded(tempProject);
-      
+
       expect(result.needed).toBe(false);
-      
+
       // Cleanup
       rmSync(tempProject, { recursive: true, force: true });
     });
 
     it("migrateBeadsToHive renames .beads to .hive", async () => {
       const { migrateBeadsToHive } = await import("./hive");
-      const { mkdirSync, existsSync, rmSync, writeFileSync } = await import("node:fs");
+      const { mkdirSync, existsSync, rmSync, writeFileSync } = await import(
+        "node:fs"
+      );
       const { join } = await import("node:path");
       const { tmpdir } = await import("node:os");
-      
+
       // Create temp project with .beads directory
       const tempProject = join(tmpdir(), `hive-migration-test-${Date.now()}`);
       const beadsDir = join(tempProject, ".beads");
       const hiveDir = join(tempProject, ".hive");
-      
+
       mkdirSync(beadsDir, { recursive: true });
-      writeFileSync(join(beadsDir, "issues.jsonl"), '{"id":"bd-test","title":"Test"}');
+      writeFileSync(
+        join(beadsDir, "issues.jsonl"),
+        '{"id":"bd-test","title":"Test"}',
+      );
       writeFileSync(join(beadsDir, "config.yaml"), "version: 1");
-      
+
       // Run migration (called after user confirms in CLI)
       const result = await migrateBeadsToHive(tempProject);
-      
+
       // Verify .beads renamed to .hive
       expect(result.migrated).toBe(true);
       expect(existsSync(hiveDir)).toBe(true);
       expect(existsSync(beadsDir)).toBe(false);
       expect(existsSync(join(hiveDir, "issues.jsonl"))).toBe(true);
       expect(existsSync(join(hiveDir, "config.yaml"))).toBe(true);
-      
+
       // Cleanup
       rmSync(tempProject, { recursive: true, force: true });
     });
 
     it("migrateBeadsToHive skips if .hive already exists", async () => {
       const { migrateBeadsToHive } = await import("./hive");
-      const { mkdirSync, existsSync, rmSync, writeFileSync } = await import("node:fs");
+      const { mkdirSync, existsSync, rmSync, writeFileSync } = await import(
+        "node:fs"
+      );
       const { join } = await import("node:path");
       const { tmpdir } = await import("node:os");
-      
+
       // Create temp project with BOTH .beads and .hive
       const tempProject = join(tmpdir(), `hive-migration-test-${Date.now()}`);
       const beadsDir = join(tempProject, ".beads");
       const hiveDir = join(tempProject, ".hive");
-      
+
       mkdirSync(beadsDir, { recursive: true });
       mkdirSync(hiveDir, { recursive: true });
       writeFileSync(join(beadsDir, "issues.jsonl"), '{"id":"bd-old"}');
       writeFileSync(join(hiveDir, "issues.jsonl"), '{"id":"bd-new"}');
-      
+
       // Run migration - should skip
       const result = await migrateBeadsToHive(tempProject);
-      
+
       // Verify both still exist (no migration)
       expect(result.migrated).toBe(false);
       expect(result.reason).toContain("already exists");
       expect(existsSync(beadsDir)).toBe(true);
       expect(existsSync(hiveDir)).toBe(true);
-      
+
       // Cleanup
       rmSync(tempProject, { recursive: true, force: true });
     });
@@ -1099,41 +1171,44 @@ describe("beads integration", () => {
       const { mkdirSync, existsSync, rmSync } = await import("node:fs");
       const { join } = await import("node:path");
       const { tmpdir } = await import("node:os");
-      
+
       // Create empty temp project
       const tempProject = join(tmpdir(), `hive-ensure-test-${Date.now()}`);
       mkdirSync(tempProject, { recursive: true });
-      
+
       const hiveDir = join(tempProject, ".hive");
       expect(existsSync(hiveDir)).toBe(false);
-      
+
       // Ensure creates it
       ensureHiveDirectory(tempProject);
-      
+
       expect(existsSync(hiveDir)).toBe(true);
-      
+
       // Cleanup
       rmSync(tempProject, { recursive: true, force: true });
     });
 
     it("ensureHiveDirectory is idempotent", async () => {
       const { ensureHiveDirectory } = await import("./hive");
-      const { mkdirSync, existsSync, rmSync, writeFileSync, readFileSync } = await import("node:fs");
+      const { mkdirSync, existsSync, rmSync, writeFileSync, readFileSync } =
+        await import("node:fs");
       const { join } = await import("node:path");
       const { tmpdir } = await import("node:os");
-      
+
       // Create temp project with existing .hive
       const tempProject = join(tmpdir(), `hive-ensure-test-${Date.now()}`);
       const hiveDir = join(tempProject, ".hive");
       mkdirSync(hiveDir, { recursive: true });
       writeFileSync(join(hiveDir, "issues.jsonl"), '{"id":"existing"}');
-      
+
       // Ensure doesn't overwrite
       ensureHiveDirectory(tempProject);
-      
+
       expect(existsSync(hiveDir)).toBe(true);
-      expect(readFileSync(join(hiveDir, "issues.jsonl"), "utf-8")).toBe('{"id":"existing"}');
-      
+      expect(readFileSync(join(hiveDir, "issues.jsonl"), "utf-8")).toBe(
+        '{"id":"existing"}',
+      );
+
       // Cleanup
       rmSync(tempProject, { recursive: true, force: true });
     });
@@ -1164,14 +1239,17 @@ describe("beads integration", () => {
 
     it("imports new records - all inserted", async () => {
       const { importJsonlToPGLite, getHiveAdapter } = await import("./hive");
-      const { mkdirSync, rmSync, writeFileSync, unlinkSync } = await import("node:fs");
+      const { mkdirSync, rmSync, writeFileSync, unlinkSync } = await import(
+        "node:fs"
+      );
       const { join } = await import("node:path");
       const { tmpdir } = await import("node:os");
 
       // Create temp project with new cells
       // Use unique IDs per run to avoid UNIQUE constraint violations in the
       // global swarm.db (PRIMARY KEY is just `id`, not composite with project_key)
-      const runId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      const runId =
+        Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
       const cellId1 = `bd-import-1-${runId}`;
       const cellId2 = `bd-import-2-${runId}`;
       const tempProject = join(tmpdir(), `hive-import-test-${Date.now()}`);
@@ -1206,7 +1284,7 @@ describe("beads integration", () => {
 
       writeFileSync(
         join(hiveDir, "issues.jsonl"),
-        JSON.stringify(cell1) + "\n" + JSON.stringify(cell2) + "\n"
+        JSON.stringify(cell1) + "\n" + JSON.stringify(cell2) + "\n",
       );
 
       // CRITICAL: Call importJsonlToPGLite() which will call getHiveAdapter()
@@ -1236,12 +1314,15 @@ describe("beads integration", () => {
 
     it("updates existing records", async () => {
       const { importJsonlToPGLite, getHiveAdapter } = await import("./hive");
-      const { mkdirSync, rmSync, writeFileSync, unlinkSync } = await import("node:fs");
+      const { mkdirSync, rmSync, writeFileSync, unlinkSync } = await import(
+        "node:fs"
+      );
       const { join } = await import("node:path");
       const { tmpdir } = await import("node:os");
 
       // Use unique ID per run to avoid UNIQUE constraint violations in global DB
-      const runId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      const runId =
+        Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
       const cellId = `bd-update-1-${runId}`;
 
       // Create temp project
@@ -1265,7 +1346,7 @@ describe("beads integration", () => {
 
       writeFileSync(
         join(hiveDir, "issues.jsonl"),
-        JSON.stringify(originalCell) + "\n"
+        JSON.stringify(originalCell) + "\n",
       );
 
       // Get adapter - this will auto-migrate the original cell
@@ -1283,7 +1364,7 @@ describe("beads integration", () => {
 
       writeFileSync(
         join(hiveDir, "issues.jsonl"),
-        JSON.stringify(updatedCell) + "\n"
+        JSON.stringify(updatedCell) + "\n",
       );
 
       const result = await importJsonlToPGLite(tempProject);
@@ -1360,7 +1441,7 @@ describe("beads integration", () => {
 
       writeFileSync(
         join(hiveDir, "issues.jsonl"),
-        JSON.stringify(existingUpdated) + "\n" + JSON.stringify(newCell) + "\n"
+        JSON.stringify(existingUpdated) + "\n" + JSON.stringify(newCell) + "\n",
       );
 
       const result = await importJsonlToPGLite(tempProject);
@@ -1405,9 +1486,10 @@ describe("beads integration", () => {
       // Mix valid and invalid JSON
       writeFileSync(
         join(hiveDir, "issues.jsonl"),
-        JSON.stringify(validCell) + "\n" +
-        "{ invalid json \n" +
-        '{"id":"incomplete"\n'
+        JSON.stringify(validCell) +
+          "\n" +
+          "{ invalid json \n" +
+          '{"id":"incomplete"\n',
       );
 
       const result = await importJsonlToPGLite(tempProject);
@@ -1445,197 +1527,291 @@ describe("beads integration", () => {
   });
 
   describe("hive_sync", () => {
-    it("succeeds with unstaged changes outside .hive/ (stash-before-pull)", async () => {
-      const { mkdirSync, rmSync, writeFileSync, existsSync } = await import("node:fs");
-      const { join } = await import("node:path");
+    // hive_sync now writes into an external hive-data repo (see
+    // hive-data-repo-design.md), resolved via HIVE_DATA_REPO. Every test in
+    // this block MUST set HIVE_DATA_REPO to its own isolated git fixture —
+    // never leave it unset. test-preload.ts defaults it to a bogus non-git
+    // path specifically so a forgotten override fails loudly here instead
+    // of silently touching (or, as happened once during development,
+    // actually pushing test-junk commits to) the real ~/hive-data repo.
+    const originalHiveDataRepo = process.env.HIVE_DATA_REPO;
+
+    afterEach(() => {
+      if (originalHiveDataRepo === undefined) {
+        delete process.env.HIVE_DATA_REPO;
+      } else {
+        process.env.HIVE_DATA_REPO = originalHiveDataRepo;
+      }
+    });
+
+    /** Init a git repo at `dir` with an initial commit. */
+    async function initGitRepo(
+      dir: string,
+      initialFile = "README.md",
+      initialContent = "init\n",
+    ) {
+      const { mkdirSync, writeFileSync } = await import("node:fs");
+      const { execSync } = await import("node:child_process");
+      mkdirSync(dir, { recursive: true });
+      execSync("git init -b main", { cwd: dir });
+      execSync('git config user.email "test@example.com"', { cwd: dir });
+      execSync('git config user.name "Test User"', { cwd: dir });
+      writeFileSync(join(dir, initialFile), initialContent);
+      execSync("git add .", { cwd: dir });
+      execSync('git commit -m "initial commit"', { cwd: dir });
+    }
+
+    it("stashes unstaged hive-data changes before pulling (auto_pull=true)", async () => {
+      const { mkdirSync, rmSync, writeFileSync } = await import("node:fs");
       const { tmpdir } = await import("node:os");
       const { execSync } = await import("node:child_process");
+      const { resolveHiveDataSlug, hiveDataProjectDir } = await import(
+        "swarm-mail"
+      );
 
-      // Create a temp git repository with a remote (to trigger pull)
+      const hiveDataRemote = join(tmpdir(), `hive-data-remote-${Date.now()}`);
+      const hiveDataLocal = join(tmpdir(), `hive-data-local-${Date.now()}`);
+      const hiveDataWriter = join(tmpdir(), `hive-data-writer-${Date.now()}`);
       const tempProject = join(tmpdir(), `hive-sync-stash-test-${Date.now()}`);
-      const remoteProject = join(tmpdir(), `hive-sync-remote-${Date.now()}`);
-      
-      // Create "remote" bare repo
-      mkdirSync(remoteProject, { recursive: true });
-      execSync("git init --bare", { cwd: remoteProject });
-      
-      // Create local repo
+
+      mkdirSync(hiveDataRemote, { recursive: true });
+      execSync("git init --bare -b main", { cwd: hiveDataRemote });
+
+      await initGitRepo(hiveDataLocal, "NOTES.md", "notes: initial\n");
+      execSync(`git remote add origin ${hiveDataRemote}`, {
+        cwd: hiveDataLocal,
+      });
+      execSync("git push -u origin main", { cwd: hiveDataLocal });
+
+      // A concurrent writer pushes a new commit to the shared remote, so
+      // hive_sync's pull --rebase has real work to do.
+      execSync(`git clone ${hiveDataRemote} ${hiveDataWriter}`);
+      execSync('git config user.email "writer@example.com"', {
+        cwd: hiveDataWriter,
+      });
+      execSync('git config user.name "Writer"', { cwd: hiveDataWriter });
+      writeFileSync(
+        join(hiveDataWriter, "FROM_WRITER.md"),
+        "written concurrently\n",
+      );
+      execSync("git add .", { cwd: hiveDataWriter });
+      execSync('git commit -m "concurrent write"', { cwd: hiveDataWriter });
+      execSync("git push", { cwd: hiveDataWriter });
+
+      // Unstaged change in hiveDataLocal's working tree, unrelated to this
+      // project's own repos/<slug>/ folder — must be stashed and popped.
+      writeFileSync(
+        join(hiveDataLocal, "NOTES.md"),
+        "notes: modified but not staged\n",
+      );
+
       mkdirSync(tempProject, { recursive: true });
-      execSync("git init -b main", { cwd: tempProject });
-      execSync('git config user.email "test@example.com"', { cwd: tempProject });
-      execSync('git config user.name "Test User"', { cwd: tempProject });
-      execSync(`git remote add origin ${remoteProject}`, { cwd: tempProject });
+      process.env.HIVE_DATA_REPO = hiveDataLocal;
 
-      // Create .hive directory and a source file
-      const hiveDir = join(tempProject, ".hive");
-      mkdirSync(hiveDir, { recursive: true });
-      writeFileSync(join(hiveDir, "issues.jsonl"), "");
-      writeFileSync(join(tempProject, "src.ts"), "// initial");
-
-      // Initial commit and push
-      execSync("git add .", { cwd: tempProject });
-      execSync('git commit -m "initial commit"', { cwd: tempProject });
-      execSync("git push -u origin main", { cwd: tempProject });
-
-      // Now create unstaged changes OUTSIDE .hive/
-      writeFileSync(join(tempProject, "src.ts"), "// modified but not staged");
-
-      // Set working directory for hive commands
       const originalDir = getHiveWorkingDirectory();
       setHiveWorkingDirectory(tempProject);
 
       try {
-        // Create a cell (this will mark it dirty and flush will write to JSONL)
         await hive_create.execute(
           { title: "Stash test cell", type: "task" },
           mockContext,
         );
 
-        // Sync WITH auto_pull=true (this is where the bug manifests)
-        // Before fix: fails with "cannot pull with rebase: You have unstaged changes"
-        // After fix: stashes, pulls, pops, succeeds
         const result = await hive_sync.execute(
           { auto_pull: true },
           mockContext,
         );
-
-        // Should succeed
         expect(result).toContain("successfully");
 
-        // Verify .hive changes were committed
-        const hiveStatus = execSync("git status --porcelain .hive/", {
-          cwd: tempProject,
-          encoding: "utf-8",
-        });
-        expect(hiveStatus.trim()).toBe("");
+        // Concurrent writer's commit was pulled in.
+        const { existsSync } = await import("node:fs");
+        expect(existsSync(join(hiveDataLocal, "FROM_WRITER.md"))).toBe(true);
 
-        // Verify unstaged changes are still there (stash was popped)
-        const srcStatus = execSync("git status --porcelain src.ts", {
-          cwd: tempProject,
+        // Unstaged NOTES.md change is still there (stash was popped).
+        const notesStatus = execSync("git status --porcelain NOTES.md", {
+          cwd: hiveDataLocal,
           encoding: "utf-8",
         });
-        expect(srcStatus.trim()).toContain("M src.ts");
+        expect(notesStatus.trim()).toContain("M NOTES.md");
+
+        // This project's own slice was committed cleanly.
+        const slug = await resolveHiveDataSlug(tempProject);
+        const syncDir = hiveDataProjectDir(hiveDataLocal, slug);
+        const { relative } = await import("node:path");
+        const syncDirRelative = relative(hiveDataLocal, syncDir);
+        const syncStatus = execSync(
+          `git status --porcelain ${syncDirRelative}`,
+          {
+            cwd: hiveDataLocal,
+            encoding: "utf-8",
+          },
+        );
+        expect(syncStatus.trim()).toBe("");
       } finally {
-        // Restore original working directory
         setHiveWorkingDirectory(originalDir);
-
-        // Cleanup
         rmSync(tempProject, { recursive: true, force: true });
-        rmSync(remoteProject, { recursive: true, force: true });
+        rmSync(hiveDataLocal, { recursive: true, force: true });
+        rmSync(hiveDataRemote, { recursive: true, force: true });
+        rmSync(hiveDataWriter, { recursive: true, force: true });
       }
     });
 
-    it("commits .hive changes before pulling (regression test for unstaged changes error)", async () => {
-      const { mkdirSync, rmSync, writeFileSync, existsSync } = await import("node:fs");
-      const { join } = await import("node:path");
+    it("commits hive-data changes when auto_pull=false and no remote is configured", async () => {
+      const { mkdirSync, rmSync } = await import("node:fs");
       const { tmpdir } = await import("node:os");
       const { execSync } = await import("node:child_process");
 
-      // Create a temp git repository
+      const hiveDataLocal = join(tmpdir(), `hive-data-local-${Date.now()}`);
       const tempProject = join(tmpdir(), `hive-sync-test-${Date.now()}`);
+
+      await initGitRepo(hiveDataLocal);
       mkdirSync(tempProject, { recursive: true });
+      process.env.HIVE_DATA_REPO = hiveDataLocal;
 
-      // Initialize git repo
-      execSync("git init", { cwd: tempProject });
-      execSync('git config user.email "test@example.com"', { cwd: tempProject });
-      execSync('git config user.name "Test User"', { cwd: tempProject });
-
-      // Create .hive directory and issues.jsonl
-      const hiveDir = join(tempProject, ".hive");
-      mkdirSync(hiveDir, { recursive: true });
-      const issuesPath = join(hiveDir, "issues.jsonl");
-      writeFileSync(issuesPath, "");
-
-      // Create .gitignore to ignore .opencode directory (created by swarm-mail)
-      const gitignorePath = join(tempProject, ".gitignore");
-      writeFileSync(gitignorePath, ".opencode/\n");
-
-      // Initial commit
-      execSync("git add .", { cwd: tempProject });
-      execSync('git commit -m "initial commit"', { cwd: tempProject });
-
-      // Set working directory for hive commands
       const originalDir = getHiveWorkingDirectory();
       setHiveWorkingDirectory(tempProject);
 
       try {
-        // Create a cell (this will mark it dirty and flush will write to JSONL)
         await hive_create.execute(
           { title: "Sync test cell", type: "task" },
           mockContext,
         );
 
-        // Sync with auto_pull=false (skip pull since no remote configured)
         const result = await hive_sync.execute(
           { auto_pull: false },
           mockContext,
         );
-
-        // Should succeed
         expect(result).toContain("successfully");
 
-        // Verify .hive changes were committed (working tree should be clean)
         const status = execSync("git status --porcelain", {
-          cwd: tempProject,
+          cwd: hiveDataLocal,
           encoding: "utf-8",
         });
         expect(status.trim()).toBe("");
 
-        // Verify commit exists
         const log = execSync("git log --oneline", {
-          cwd: tempProject,
+          cwd: hiveDataLocal,
           encoding: "utf-8",
         });
         expect(log).toContain("chore: sync hive");
-      } finally {
-        // Restore original working directory
-        setHiveWorkingDirectory(originalDir);
 
-        // Cleanup
+        // The working repo itself was never touched.
+        const { existsSync } = await import("node:fs");
+        expect(existsSync(join(tempProject, ".hive"))).toBe(false);
+      } finally {
+        setHiveWorkingDirectory(originalDir);
         rmSync(tempProject, { recursive: true, force: true });
+        rmSync(hiveDataLocal, { recursive: true, force: true });
       }
     });
 
     it("handles case with no changes to commit", async () => {
-      const { mkdirSync, rmSync, writeFileSync } = await import("node:fs");
-      const { join } = await import("node:path");
+      const { mkdirSync, rmSync } = await import("node:fs");
       const { tmpdir } = await import("node:os");
-      const { execSync } = await import("node:child_process");
 
-      // Create temp git repo
+      const hiveDataLocal = join(tmpdir(), `hive-data-local-${Date.now()}`);
       const tempProject = join(tmpdir(), `hive-sync-test-${Date.now()}`);
+
+      await initGitRepo(hiveDataLocal);
       mkdirSync(tempProject, { recursive: true });
+      process.env.HIVE_DATA_REPO = hiveDataLocal;
 
-      // Initialize git
-      execSync("git init", { cwd: tempProject });
-      execSync('git config user.email "test@example.com"', { cwd: tempProject });
-      execSync('git config user.name "Test User"', { cwd: tempProject });
-
-      // Create .hive directory with committed issues.jsonl
-      const hiveDir = join(tempProject, ".hive");
-      mkdirSync(hiveDir, { recursive: true });
-      writeFileSync(join(hiveDir, "issues.jsonl"), "");
-
-      // Commit everything
-      execSync("git add .", { cwd: tempProject });
-      execSync('git commit -m "initial"', { cwd: tempProject });
-
-      // Set working directory
       const originalDir = getHiveWorkingDirectory();
       setHiveWorkingDirectory(tempProject);
 
       try {
-        // Sync with no changes (should handle gracefully)
+        // No cells created — nothing dirty to flush or export.
         const result = await hive_sync.execute(
           { auto_pull: false },
           mockContext,
         );
-
-        // Should return success message (either "No cells or memories to sync" or "no remote configured")
-        expect(result).toMatch(/No cells or memories to sync|no remote configured|synced successfully/);
+        expect(result).toMatch(
+          /No cells or memories to sync|no remote configured|synced successfully/,
+        );
       } finally {
         setHiveWorkingDirectory(originalDir);
         rmSync(tempProject, { recursive: true, force: true });
+        rmSync(hiveDataLocal, { recursive: true, force: true });
+      }
+    });
+
+    it("fails loudly (does not silently fall back to the working repo) when HIVE_DATA_REPO is missing or not a git repo", async () => {
+      const { mkdirSync, rmSync, existsSync } = await import("node:fs");
+      const { tmpdir } = await import("node:os");
+
+      const missingHiveDataRepo = join(
+        tmpdir(),
+        `hive-data-missing-${Date.now()}`,
+      );
+      const tempProject = join(
+        tmpdir(),
+        `hive-sync-missing-test-${Date.now()}`,
+      );
+
+      mkdirSync(tempProject, { recursive: true });
+      process.env.HIVE_DATA_REPO = missingHiveDataRepo;
+
+      const originalDir = getHiveWorkingDirectory();
+      setHiveWorkingDirectory(tempProject);
+
+      try {
+        await expect(
+          hive_sync.execute({ auto_pull: false }, mockContext),
+        ).rejects.toThrow(/hive-data repo not found.*clone/is);
+
+        // Never silently created the missing path, and never touched the
+        // working repo's own .hive/.
+        expect(existsSync(missingHiveDataRepo)).toBe(false);
+        expect(existsSync(join(tempProject, ".hive"))).toBe(false);
+      } finally {
+        setHiveWorkingDirectory(originalDir);
+        rmSync(tempProject, { recursive: true, force: true });
+      }
+    });
+
+    it("never writes to the working repo's own .hive/ directory", async () => {
+      const { mkdirSync, rmSync, writeFileSync, readFileSync } = await import(
+        "node:fs"
+      );
+      const { tmpdir } = await import("node:os");
+      const { createHash } = await import("node:crypto");
+
+      const hiveDataLocal = join(tmpdir(), `hive-data-local-${Date.now()}`);
+      const tempProject = join(
+        tmpdir(),
+        `hive-sync-untouched-test-${Date.now()}`,
+      );
+
+      await initGitRepo(hiveDataLocal);
+      mkdirSync(tempProject, { recursive: true });
+
+      // Simulate a pre-existing legacy .hive/ in the working repo, exactly
+      // as katas has today — this must be byte-identical after sync.
+      const legacyHiveDir = join(tempProject, ".hive");
+      mkdirSync(legacyHiveDir, { recursive: true });
+      writeFileSync(join(legacyHiveDir, "issues.jsonl"), '{"id":"legacy-1"}\n');
+      const before = readFileSync(join(legacyHiveDir, "issues.jsonl"));
+      const beforeHash = createHash("sha256").update(before).digest("hex");
+
+      process.env.HIVE_DATA_REPO = hiveDataLocal;
+
+      const originalDir = getHiveWorkingDirectory();
+      setHiveWorkingDirectory(tempProject);
+
+      try {
+        await hive_create.execute(
+          { title: "Untouched .hive test cell", type: "task" },
+          mockContext,
+        );
+        await hive_sync.execute({ auto_pull: false }, mockContext);
+
+        const after = readFileSync(join(legacyHiveDir, "issues.jsonl"));
+        const afterHash = createHash("sha256").update(after).digest("hex");
+        expect(afterHash).toBe(beforeHash);
+      } finally {
+        setHiveWorkingDirectory(originalDir);
+        rmSync(tempProject, { recursive: true, force: true });
+        rmSync(hiveDataLocal, { recursive: true, force: true });
       }
     });
   });
@@ -1646,151 +1822,183 @@ describe("beads integration", () => {
       const { mkdirSync, rmSync, writeFileSync } = await import("node:fs");
       const { join } = await import("node:path");
       const { tmpdir } = await import("node:os");
-      
+
       // Create temp project with .hive directory
       const tempProject = join(tmpdir(), `hive-merge-test-${Date.now()}`);
       const hiveDir = join(tempProject, ".hive");
       mkdirSync(hiveDir, { recursive: true });
-      
+
       // Create empty base file
       writeFileSync(join(hiveDir, "beads.base.jsonl"), "");
-      
+
       // Create issues.jsonl with one bead
       const existingBead = { id: "bd-existing", title: "Existing bead" };
-      writeFileSync(join(hiveDir, "issues.jsonl"), JSON.stringify(existingBead) + "\n");
-      
+      writeFileSync(
+        join(hiveDir, "issues.jsonl"),
+        JSON.stringify(existingBead) + "\n",
+      );
+
       const result = await mergeHistoricBeads(tempProject);
-      
+
       expect(result.merged).toBe(0);
       expect(result.skipped).toBe(0);
-      
+
       // Cleanup
       rmSync(tempProject, { recursive: true, force: true });
     });
 
     it("merges empty issues file - all base records imported", async () => {
       const { mergeHistoricBeads } = await import("./hive");
-      const { mkdirSync, rmSync, writeFileSync, readFileSync } = await import("node:fs");
+      const { mkdirSync, rmSync, writeFileSync, readFileSync } = await import(
+        "node:fs"
+      );
       const { join } = await import("node:path");
       const { tmpdir } = await import("node:os");
-      
+
       // Create temp project
       const tempProject = join(tmpdir(), `hive-merge-test-${Date.now()}`);
       const hiveDir = join(tempProject, ".hive");
       mkdirSync(hiveDir, { recursive: true });
-      
+
       // Create base file with 2 beads
       const baseBead1 = { id: "bd-base-1", title: "Historic bead 1" };
       const baseBead2 = { id: "bd-base-2", title: "Historic bead 2" };
       writeFileSync(
         join(hiveDir, "beads.base.jsonl"),
-        JSON.stringify(baseBead1) + "\n" + JSON.stringify(baseBead2) + "\n"
+        JSON.stringify(baseBead1) + "\n" + JSON.stringify(baseBead2) + "\n",
       );
-      
+
       // Empty issues file
       writeFileSync(join(hiveDir, "issues.jsonl"), "");
-      
+
       const result = await mergeHistoricBeads(tempProject);
-      
+
       expect(result.merged).toBe(2);
       expect(result.skipped).toBe(0);
-      
+
       // Verify issues.jsonl now has both beads
-      const issuesContent = readFileSync(join(hiveDir, "issues.jsonl"), "utf-8");
-      const lines = issuesContent.trim().split("\n").filter(l => l);
+      const issuesContent = readFileSync(
+        join(hiveDir, "issues.jsonl"),
+        "utf-8",
+      );
+      const lines = issuesContent
+        .trim()
+        .split("\n")
+        .filter((l) => l);
       expect(lines).toHaveLength(2);
-      
-      const beads = lines.map(line => JSON.parse(line));
-      expect(beads.find(b => b.id === "bd-base-1")).toBeDefined();
-      expect(beads.find(b => b.id === "bd-base-2")).toBeDefined();
-      
+
+      const beads = lines.map((line) => JSON.parse(line));
+      expect(beads.find((b) => b.id === "bd-base-1")).toBeDefined();
+      expect(beads.find((b) => b.id === "bd-base-2")).toBeDefined();
+
       // Cleanup
       rmSync(tempProject, { recursive: true, force: true });
     });
 
     it("overlapping IDs - issues.jsonl wins (more recent)", async () => {
       const { mergeHistoricBeads } = await import("./hive");
-      const { mkdirSync, rmSync, writeFileSync, readFileSync } = await import("node:fs");
+      const { mkdirSync, rmSync, writeFileSync, readFileSync } = await import(
+        "node:fs"
+      );
       const { join } = await import("node:path");
       const { tmpdir } = await import("node:os");
-      
+
       // Create temp project
       const tempProject = join(tmpdir(), `hive-merge-test-${Date.now()}`);
       const hiveDir = join(tempProject, ".hive");
       mkdirSync(hiveDir, { recursive: true });
-      
+
       // Base has old version of bd-overlap
-      const baseOldVersion = { id: "bd-overlap", title: "Old title", status: "open" };
+      const baseOldVersion = {
+        id: "bd-overlap",
+        title: "Old title",
+        status: "open",
+      };
       writeFileSync(
         join(hiveDir, "beads.base.jsonl"),
-        JSON.stringify(baseOldVersion) + "\n"
+        JSON.stringify(baseOldVersion) + "\n",
       );
-      
+
       // Issues has new version (updated)
-      const issuesNewVersion = { id: "bd-overlap", title: "New title", status: "closed" };
+      const issuesNewVersion = {
+        id: "bd-overlap",
+        title: "New title",
+        status: "closed",
+      };
       writeFileSync(
         join(hiveDir, "issues.jsonl"),
-        JSON.stringify(issuesNewVersion) + "\n"
+        JSON.stringify(issuesNewVersion) + "\n",
       );
-      
+
       const result = await mergeHistoricBeads(tempProject);
-      
+
       expect(result.merged).toBe(0); // Nothing new to merge
       expect(result.skipped).toBe(1); // Skipped the old version
-      
+
       // Verify issues.jsonl still has new version (unchanged)
-      const issuesContent = readFileSync(join(hiveDir, "issues.jsonl"), "utf-8");
+      const issuesContent = readFileSync(
+        join(hiveDir, "issues.jsonl"),
+        "utf-8",
+      );
       const bead = JSON.parse(issuesContent.trim());
       expect(bead.title).toBe("New title");
       expect(bead.status).toBe("closed");
-      
+
       // Cleanup
       rmSync(tempProject, { recursive: true, force: true });
     });
 
     it("no overlap - all records combined", async () => {
       const { mergeHistoricBeads } = await import("./hive");
-      const { mkdirSync, rmSync, writeFileSync, readFileSync } = await import("node:fs");
+      const { mkdirSync, rmSync, writeFileSync, readFileSync } = await import(
+        "node:fs"
+      );
       const { join } = await import("node:path");
       const { tmpdir } = await import("node:os");
-      
+
       // Create temp project
       const tempProject = join(tmpdir(), `hive-merge-test-${Date.now()}`);
       const hiveDir = join(tempProject, ".hive");
       mkdirSync(hiveDir, { recursive: true });
-      
+
       // Base has 2 beads
       const baseBead1 = { id: "bd-base-1", title: "Historic 1" };
       const baseBead2 = { id: "bd-base-2", title: "Historic 2" };
       writeFileSync(
         join(hiveDir, "beads.base.jsonl"),
-        JSON.stringify(baseBead1) + "\n" + JSON.stringify(baseBead2) + "\n"
+        JSON.stringify(baseBead1) + "\n" + JSON.stringify(baseBead2) + "\n",
       );
-      
+
       // Issues has 2 different beads
       const issuesBead1 = { id: "bd-current-1", title: "Current 1" };
       const issuesBead2 = { id: "bd-current-2", title: "Current 2" };
       writeFileSync(
         join(hiveDir, "issues.jsonl"),
-        JSON.stringify(issuesBead1) + "\n" + JSON.stringify(issuesBead2) + "\n"
+        JSON.stringify(issuesBead1) + "\n" + JSON.stringify(issuesBead2) + "\n",
       );
-      
+
       const result = await mergeHistoricBeads(tempProject);
-      
+
       expect(result.merged).toBe(2); // Added 2 from base
       expect(result.skipped).toBe(0);
-      
+
       // Verify issues.jsonl now has all 4 beads
-      const issuesContent = readFileSync(join(hiveDir, "issues.jsonl"), "utf-8");
-      const lines = issuesContent.trim().split("\n").filter(l => l);
+      const issuesContent = readFileSync(
+        join(hiveDir, "issues.jsonl"),
+        "utf-8",
+      );
+      const lines = issuesContent
+        .trim()
+        .split("\n")
+        .filter((l) => l);
       expect(lines).toHaveLength(4);
-      
-      const beads = lines.map(line => JSON.parse(line));
-      expect(beads.find(b => b.id === "bd-base-1")).toBeDefined();
-      expect(beads.find(b => b.id === "bd-base-2")).toBeDefined();
-      expect(beads.find(b => b.id === "bd-current-1")).toBeDefined();
-      expect(beads.find(b => b.id === "bd-current-2")).toBeDefined();
-      
+
+      const beads = lines.map((line) => JSON.parse(line));
+      expect(beads.find((b) => b.id === "bd-base-1")).toBeDefined();
+      expect(beads.find((b) => b.id === "bd-base-2")).toBeDefined();
+      expect(beads.find((b) => b.id === "bd-current-1")).toBeDefined();
+      expect(beads.find((b) => b.id === "bd-current-2")).toBeDefined();
+
       // Cleanup
       rmSync(tempProject, { recursive: true, force: true });
     });
@@ -1800,88 +2008,107 @@ describe("beads integration", () => {
       const { mkdirSync, rmSync, writeFileSync } = await import("node:fs");
       const { join } = await import("node:path");
       const { tmpdir } = await import("node:os");
-      
+
       // Create temp project with .hive but NO base file
       const tempProject = join(tmpdir(), `hive-merge-test-${Date.now()}`);
       const hiveDir = join(tempProject, ".hive");
       mkdirSync(hiveDir, { recursive: true });
-      
+
       // Issues exists, base doesn't
       const issuesBead = { id: "bd-current", title: "Current" };
-      writeFileSync(join(hiveDir, "issues.jsonl"), JSON.stringify(issuesBead) + "\n");
-      
+      writeFileSync(
+        join(hiveDir, "issues.jsonl"),
+        JSON.stringify(issuesBead) + "\n",
+      );
+
       const result = await mergeHistoricBeads(tempProject);
-      
+
       // Should return zeros, not throw
       expect(result.merged).toBe(0);
       expect(result.skipped).toBe(0);
-      
+
       // Cleanup
       rmSync(tempProject, { recursive: true, force: true });
     });
 
     it("missing issues file - creates it from base", async () => {
       const { mergeHistoricBeads } = await import("./hive");
-      const { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } = await import("node:fs");
+      const { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } =
+        await import("node:fs");
       const { join } = await import("node:path");
       const { tmpdir } = await import("node:os");
-      
+
       // Create temp project with base but NO issues file
       const tempProject = join(tmpdir(), `hive-merge-test-${Date.now()}`);
       const hiveDir = join(tempProject, ".hive");
       mkdirSync(hiveDir, { recursive: true });
-      
+
       // Base exists, issues doesn't
       const baseBead = { id: "bd-base", title: "Historic" };
       writeFileSync(
         join(hiveDir, "beads.base.jsonl"),
-        JSON.stringify(baseBead) + "\n"
+        JSON.stringify(baseBead) + "\n",
       );
-      
+
       const issuesPath = join(hiveDir, "issues.jsonl");
       expect(existsSync(issuesPath)).toBe(false);
-      
+
       const result = await mergeHistoricBeads(tempProject);
-      
+
       expect(result.merged).toBe(1);
       expect(result.skipped).toBe(0);
-      
+
       // Verify issues.jsonl was created
       expect(existsSync(issuesPath)).toBe(true);
       const content = readFileSync(issuesPath, "utf-8");
       const bead = JSON.parse(content.trim());
       expect(bead.id).toBe("bd-base");
-      
+
       // Cleanup
       rmSync(tempProject, { recursive: true, force: true });
     });
   });
 
   describe("process exit hook", () => {
-    it("registers beforeExit hook that syncs dirty cells", async () => {
-      const { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } = await import("node:fs");
+    it("registers beforeExit hook that syncs dirty cells to the hive-data mirror (never the working repo)", async () => {
+      const { mkdirSync, rmSync, readFileSync, existsSync } = await import(
+        "node:fs"
+      );
       const { join } = await import("node:path");
       const { tmpdir } = await import("node:os");
       const { execSync } = await import("node:child_process");
+      const { resolveHiveDataSlug, hiveDataProjectDir } = await import(
+        "swarm-mail"
+      );
 
-      // Create temp project
+      // Create temp project (no .hive/ - the exit hook must never create one)
       const tempProject = join(tmpdir(), `hive-exit-hook-test-${Date.now()}`);
-      const hiveDir = join(tempProject, ".hive");
-      mkdirSync(hiveDir, { recursive: true });
+      mkdirSync(tempProject, { recursive: true });
 
-      // Initialize git repo
-      execSync("git init", { cwd: tempProject });
-      execSync('git config user.email "test@example.com"', { cwd: tempProject });
-      execSync('git config user.name "Test User"', { cwd: tempProject });
+      // Isolated hive-data fixture for this test.
+      const hiveDataLocal = join(
+        tmpdir(),
+        `hive-exit-hook-hive-data-${Date.now()}`,
+      );
+      mkdirSync(hiveDataLocal, { recursive: true });
+      execSync("git init -b main", { cwd: hiveDataLocal });
+      execSync('git config user.email "test@example.com"', {
+        cwd: hiveDataLocal,
+      });
+      execSync('git config user.name "Test User"', { cwd: hiveDataLocal });
+      execSync("git commit --allow-empty -m initial", { cwd: hiveDataLocal });
 
-      // Initial commit with empty issues.jsonl
-      writeFileSync(join(hiveDir, "issues.jsonl"), "");
-      execSync("git add .", { cwd: tempProject });
-      execSync('git commit -m "initial"', { cwd: tempProject });
-
-      // Set working directory
+      // Set working directory + isolated HIVE_DATA_REPO
       const originalDir = getHiveWorkingDirectory();
       setHiveWorkingDirectory(tempProject);
+      const originalHiveDataRepo = process.env.HIVE_DATA_REPO;
+      process.env.HIVE_DATA_REPO = hiveDataLocal;
+
+      const slug = await resolveHiveDataSlug(tempProject);
+      const jsonlPath = join(
+        hiveDataProjectDir(hiveDataLocal, slug),
+        "issues.jsonl",
+      );
 
       try {
         // Create a cell (marks it dirty but don't sync)
@@ -1890,43 +2117,80 @@ describe("beads integration", () => {
           mockContext,
         );
 
-        // Verify cell is NOT in JSONL yet (only in PGLite)
-        const beforeContent = readFileSync(join(hiveDir, "issues.jsonl"), "utf-8");
-        expect(beforeContent.trim()).toBe("");
+        // Verify cell is NOT flushed to the hive-data mirror yet
+        expect(existsSync(jsonlPath)).toBe(false);
 
         // Simulate process exit by triggering beforeExit event
         process.emit("beforeExit", 0);
 
         // Wait for async flush to complete
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise((resolve) => setTimeout(resolve, 100));
 
-        // Verify cell was synced to JSONL by the exit hook
-        const afterContent = readFileSync(join(hiveDir, "issues.jsonl"), "utf-8");
+        // Verify cell was synced to the hive-data mirror by the exit hook
+        expect(existsSync(jsonlPath)).toBe(true);
+        const afterContent = readFileSync(jsonlPath, "utf-8");
         expect(afterContent.trim()).not.toBe("");
 
-        const cells = afterContent.trim().split("\n").map(line => JSON.parse(line));
+        const cells = afterContent
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line));
         expect(cells).toHaveLength(1);
         expect(cells[0].title).toBe("Exit hook test cell");
+
+        // The working repo itself was never touched.
+        expect(existsSync(join(tempProject, ".hive"))).toBe(false);
       } finally {
         setHiveWorkingDirectory(originalDir);
+        if (originalHiveDataRepo === undefined) {
+          delete process.env.HIVE_DATA_REPO;
+        } else {
+          process.env.HIVE_DATA_REPO = originalHiveDataRepo;
+        }
         rmSync(tempProject, { recursive: true, force: true });
+        rmSync(hiveDataLocal, { recursive: true, force: true });
       }
     });
 
     it("exit hook is idempotent - safe to call multiple times", async () => {
-      const { mkdirSync, rmSync, writeFileSync, readFileSync } = await import("node:fs");
+      const { mkdirSync, rmSync, readFileSync, existsSync } = await import(
+        "node:fs"
+      );
       const { join } = await import("node:path");
       const { tmpdir } = await import("node:os");
+      const { execSync } = await import("node:child_process");
+      const { resolveHiveDataSlug, hiveDataProjectDir } = await import(
+        "swarm-mail"
+      );
 
       // Create temp project
       const tempProject = join(tmpdir(), `hive-exit-hook-test-${Date.now()}`);
-      const hiveDir = join(tempProject, ".hive");
-      mkdirSync(hiveDir, { recursive: true });
-      writeFileSync(join(hiveDir, "issues.jsonl"), "");
+      mkdirSync(tempProject, { recursive: true });
 
-      // Set working directory
+      // Isolated hive-data fixture for this test.
+      const hiveDataLocal = join(
+        tmpdir(),
+        `hive-exit-hook-idempotent-hive-data-${Date.now()}`,
+      );
+      mkdirSync(hiveDataLocal, { recursive: true });
+      execSync("git init -b main", { cwd: hiveDataLocal });
+      execSync('git config user.email "test@example.com"', {
+        cwd: hiveDataLocal,
+      });
+      execSync('git config user.name "Test User"', { cwd: hiveDataLocal });
+      execSync("git commit --allow-empty -m initial", { cwd: hiveDataLocal });
+
+      // Set working directory + isolated HIVE_DATA_REPO
       const originalDir = getHiveWorkingDirectory();
       setHiveWorkingDirectory(tempProject);
+      const originalHiveDataRepo = process.env.HIVE_DATA_REPO;
+      process.env.HIVE_DATA_REPO = hiveDataLocal;
+
+      const slug = await resolveHiveDataSlug(tempProject);
+      const jsonlPath = join(
+        hiveDataProjectDir(hiveDataLocal, slug),
+        "issues.jsonl",
+      );
 
       try {
         // Create a cell
@@ -1937,30 +2201,42 @@ describe("beads integration", () => {
 
         // Trigger exit hook multiple times
         process.emit("beforeExit", 0);
-        await new Promise(resolve => setTimeout(resolve, 50));
-        
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
         process.emit("beforeExit", 0);
-        await new Promise(resolve => setTimeout(resolve, 50));
+        await new Promise((resolve) => setTimeout(resolve, 50));
 
         // Verify cell is written only once (no duplication)
-        const content = readFileSync(join(hiveDir, "issues.jsonl"), "utf-8");
-        const lines = content.trim().split("\n").filter(l => l);
-        
+        expect(existsSync(jsonlPath)).toBe(true);
+        const content = readFileSync(jsonlPath, "utf-8");
+        const lines = content
+          .trim()
+          .split("\n")
+          .filter((l) => l);
+
         // Should have exactly one cell (even though we triggered hook twice)
         expect(lines.length).toBeGreaterThanOrEqual(1);
-        
+
         // All cells should have unique IDs
-        const cells = lines.map(line => JSON.parse(line));
-        const uniqueIds = new Set(cells.map(c => c.id));
+        const cells = lines.map((line) => JSON.parse(line));
+        const uniqueIds = new Set(cells.map((c) => c.id));
         expect(uniqueIds.size).toBe(cells.length);
       } finally {
         setHiveWorkingDirectory(originalDir);
+        if (originalHiveDataRepo === undefined) {
+          delete process.env.HIVE_DATA_REPO;
+        } else {
+          process.env.HIVE_DATA_REPO = originalHiveDataRepo;
+        }
         rmSync(tempProject, { recursive: true, force: true });
+        rmSync(hiveDataLocal, { recursive: true, force: true });
       }
     });
 
     it("exit hook handles case with no dirty cells gracefully", async () => {
-      const { mkdirSync, rmSync, writeFileSync, readFileSync } = await import("node:fs");
+      const { mkdirSync, rmSync, writeFileSync, readFileSync } = await import(
+        "node:fs"
+      );
       const { join } = await import("node:path");
       const { tmpdir } = await import("node:os");
 
@@ -1977,7 +2253,7 @@ describe("beads integration", () => {
       try {
         // Trigger exit hook with no dirty cells (should not throw)
         process.emit("beforeExit", 0);
-        await new Promise(resolve => setTimeout(resolve, 50));
+        await new Promise((resolve) => setTimeout(resolve, 50));
 
         // JSONL should still be empty (no error thrown)
         const content = readFileSync(join(hiveDir, "issues.jsonl"), "utf-8");
@@ -2005,7 +2281,7 @@ describe("beads integration", () => {
 
     it("lists all cells with no filters", async () => {
       const { hive_cells } = await import("./hive");
-      
+
       const result = await hive_cells.execute({}, mockContext);
       const cells = parseResponse<Cell[]>(result);
 
@@ -2015,7 +2291,7 @@ describe("beads integration", () => {
 
     it("filters by status", async () => {
       const { hive_cells } = await import("./hive");
-      
+
       const result = await hive_cells.execute({ status: "open" }, mockContext);
       const cells = parseResponse<Cell[]>(result);
 
@@ -2025,7 +2301,7 @@ describe("beads integration", () => {
 
     it("filters by type", async () => {
       const { hive_cells } = await import("./hive");
-      
+
       // Create a bug cell
       const bugResult = await hive_create.execute(
         { title: "Bug for cells test", type: "bug" },
@@ -2043,7 +2319,7 @@ describe("beads integration", () => {
 
     it("returns next ready cell when ready=true", async () => {
       const { hive_cells } = await import("./hive");
-      
+
       const result = await hive_cells.execute({ ready: true }, mockContext);
       const cells = parseResponse<Cell[]>(result);
 
@@ -2057,13 +2333,16 @@ describe("beads integration", () => {
 
     it("looks up cells by partial ID (returns all matches)", async () => {
       const { hive_cells } = await import("./hive");
-      
+
       // Extract hash from full ID (6-char segment before the last hyphen)
       const lastHyphenIndex = testCellId.lastIndexOf("-");
       const beforeLast = testCellId.substring(0, lastHyphenIndex);
       const secondLastHyphenIndex = beforeLast.lastIndexOf("-");
-      const hash = testCellId.substring(secondLastHyphenIndex + 1, lastHyphenIndex);
-      
+      const hash = testCellId.substring(
+        secondLastHyphenIndex + 1,
+        lastHyphenIndex,
+      );
+
       // Use last 6 chars of hash (or full hash if short)
       const shortHash = hash.substring(Math.max(0, hash.length - 6));
 
@@ -2073,12 +2352,12 @@ describe("beads integration", () => {
       // Should return all cells matching the partial ID (may be multiple)
       expect(cells.length).toBeGreaterThanOrEqual(1);
       // Our test cell should be in the results
-      expect(cells.some(c => c.id === testCellId)).toBe(true);
+      expect(cells.some((c) => c.id === testCellId)).toBe(true);
     });
 
     it("looks up cell by full ID", async () => {
       const { hive_cells } = await import("./hive");
-      
+
       const result = await hive_cells.execute({ id: testCellId }, mockContext);
       const cells = parseResponse<Cell[]>(result);
 
@@ -2089,7 +2368,7 @@ describe("beads integration", () => {
 
     it("throws error for non-existent ID", async () => {
       const { hive_cells } = await import("./hive");
-      
+
       await expect(
         hive_cells.execute({ id: "nonexistent999" }, mockContext),
       ).rejects.toThrow(/not found|no cell|nonexistent999/i);
@@ -2097,7 +2376,7 @@ describe("beads integration", () => {
 
     it("respects limit parameter", async () => {
       const { hive_cells } = await import("./hive");
-      
+
       const result = await hive_cells.execute({ limit: 2 }, mockContext);
       const cells = parseResponse<Cell[]>(result);
 
@@ -2106,7 +2385,7 @@ describe("beads integration", () => {
 
     it("combines filters (status + type + limit)", async () => {
       const { hive_cells } = await import("./hive");
-      
+
       // Create some task cells
       for (let i = 0; i < 3; i++) {
         const r = await hive_create.execute(
@@ -2124,7 +2403,9 @@ describe("beads integration", () => {
       const cells = parseResponse<Cell[]>(result);
 
       expect(cells.length).toBeLessThanOrEqual(2);
-      expect(cells.every((c) => c.status === "open" && c.issue_type === "task")).toBe(true);
+      expect(
+        cells.every((c) => c.status === "open" && c.issue_type === "task"),
+      ).toBe(true);
     });
   });
 
@@ -2145,21 +2426,28 @@ describe("beads integration", () => {
         // Create a cell
         const createResponse = await hive_create.execute(
           { title: "Test bigint dates", type: "task" },
-          mockContext
+          mockContext,
         );
         const created = parseResponse<Cell>(createResponse);
-        
+
         // Query it back - this triggers formatCellForOutput with PGLite bigint timestamps
-        const queryResponse = await hive_query.execute({ status: "open" }, mockContext);
+        const queryResponse = await hive_query.execute(
+          { status: "open" },
+          mockContext,
+        );
         const queried = parseResponse<Cell[]>(queryResponse);
 
         expect(queried.length).toBeGreaterThan(0);
-        const cell = queried.find(c => c.id === created.id);
+        const cell = queried.find((c) => c.id === created.id);
         expect(cell).toBeDefined();
 
         // These should be valid ISO date strings, not "Invalid Date"
-        expect(cell!.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
-        expect(cell!.updated_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+        expect(cell!.created_at).toMatch(
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+        );
+        expect(cell!.updated_at).toMatch(
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+        );
         expect(cell!.created_at).not.toBe("Invalid Date");
         expect(cell!.updated_at).not.toBe("Invalid Date");
 
@@ -2179,7 +2467,10 @@ describe("beads integration", () => {
       const { join } = await import("node:path");
       const { tmpdir } = await import("node:os");
 
-      const tempProject = join(tmpdir(), `hive-bigint-closed-test-${Date.now()}`);
+      const tempProject = join(
+        tmpdir(),
+        `hive-bigint-closed-test-${Date.now()}`,
+      );
       const hiveDir = join(tempProject, ".hive");
       mkdirSync(hiveDir, { recursive: true });
 
@@ -2190,23 +2481,28 @@ describe("beads integration", () => {
         // Create and close a cell
         const createResponse = await hive_create.execute(
           { title: "Test closed bigint date", type: "task" },
-          mockContext
+          mockContext,
         );
         const created = parseResponse<Cell>(createResponse);
 
         await hive_close.execute(
           { id: created.id, reason: "Testing bigint closed_at" },
-          mockContext
+          mockContext,
         );
 
         // Query closed cells
-        const queryResponse = await hive_query.execute({ status: "closed" }, mockContext);
+        const queryResponse = await hive_query.execute(
+          { status: "closed" },
+          mockContext,
+        );
         const queried = parseResponse<Cell[]>(queryResponse);
 
-        const cell = queried.find(c => c.id === created.id);
+        const cell = queried.find((c) => c.id === created.id);
         expect(cell).toBeDefined();
         expect(cell!.closed_at).toBeDefined();
-        expect(cell!.closed_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+        expect(cell!.closed_at).toMatch(
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+        );
         expect(cell!.closed_at).not.toBe("Invalid Date");
 
         // Verify closed_at is valid
@@ -2230,41 +2526,41 @@ describe("beads integration", () => {
         // Create an epic
         const epicResponse = await hive_create.execute(
           { title: "Epic Task", type: "epic", priority: 1 },
-          mockContext
+          mockContext,
         );
         const epic = parseResponse<Cell>(epicResponse);
 
         // Create children of the epic
         const child1Response = await hive_create.execute(
           { title: "Subtask 1", type: "task", parent_id: epic.id },
-          mockContext
+          mockContext,
         );
         const child1 = parseResponse<Cell>(child1Response);
 
         const child2Response = await hive_create.execute(
           { title: "Subtask 2", type: "task", parent_id: epic.id },
-          mockContext
+          mockContext,
         );
         const child2 = parseResponse<Cell>(child2Response);
 
         // Create unrelated cell
         await hive_create.execute(
           { title: "Unrelated Task", type: "task" },
-          mockContext
+          mockContext,
         );
 
         // Query by parent_id
         const queryResponse = await hive_query.execute(
           { parent_id: epic.id },
-          mockContext
+          mockContext,
         );
         const children = parseResponse<Cell[]>(queryResponse);
 
         // Should only return the 2 children
         expect(children).toHaveLength(2);
-        expect(children.map(c => c.id)).toContain(child1.id);
-        expect(children.map(c => c.id)).toContain(child2.id);
-        expect(children.every(c => c.parent_id === epic.id)).toBe(true);
+        expect(children.map((c) => c.id)).toContain(child1.id);
+        expect(children.map((c) => c.id)).toContain(child2.id);
+        expect(children.every((c) => c.parent_id === epic.id)).toBe(true);
       } finally {
         setHiveWorkingDirectory(originalDir);
         rmSync(tempProject, { recursive: true, force: true });
@@ -2273,7 +2569,10 @@ describe("beads integration", () => {
 
     it("hive_cells filters by parent_id to get epic children", async () => {
       const { rmSync } = await import("node:fs");
-      const tempProject = join(tmpdir(), `hive-cells-parent-filter-${Date.now()}`);
+      const tempProject = join(
+        tmpdir(),
+        `hive-cells-parent-filter-${Date.now()}`,
+      );
       const originalDir = getHiveWorkingDirectory();
       setHiveWorkingDirectory(tempProject);
 
@@ -2281,41 +2580,41 @@ describe("beads integration", () => {
         // Create an epic
         const epicResponse = await hive_create.execute(
           { title: "Epic with Children", type: "epic", priority: 1 },
-          mockContext
+          mockContext,
         );
         const epic = parseResponse<Cell>(epicResponse);
 
         // Create children
         const child1Response = await hive_create.execute(
           { title: "Child A", type: "task", parent_id: epic.id },
-          mockContext
+          mockContext,
         );
         const child1 = parseResponse<Cell>(child1Response);
 
         const child2Response = await hive_create.execute(
           { title: "Child B", type: "bug", parent_id: epic.id },
-          mockContext
+          mockContext,
         );
         const child2 = parseResponse<Cell>(child2Response);
 
         // Create unrelated cells
         await hive_create.execute(
           { title: "Orphan Task", type: "task" },
-          mockContext
+          mockContext,
         );
 
         // Query using hive_cells with parent_id
         const cellsResponse = await hive_cells.execute(
           { parent_id: epic.id },
-          mockContext
+          mockContext,
         );
         const cells = parseResponse<Cell[]>(cellsResponse);
 
         // Should only return the 2 children
         expect(cells).toHaveLength(2);
-        expect(cells.map(c => c.id)).toContain(child1.id);
-        expect(cells.map(c => c.id)).toContain(child2.id);
-        expect(cells.every(c => c.parent_id === epic.id)).toBe(true);
+        expect(cells.map((c) => c.id)).toContain(child1.id);
+        expect(cells.map((c) => c.id)).toContain(child2.id);
+        expect(cells.every((c) => c.parent_id === epic.id)).toBe(true);
       } finally {
         setHiveWorkingDirectory(originalDir);
         rmSync(tempProject, { recursive: true, force: true });

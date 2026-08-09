@@ -230,6 +230,57 @@ describe("captureSubtaskOutcome integration", () => {
     captureOutcomeSpy.mockRestore();
   });
 
+  test("succeeds without start_time (Bug 1 regression test)", async () => {
+    // start_time is documented as optional. A caller who genuinely doesn't
+    // know when a task started must not be rejected - that's what caused
+    // every worker last session to fall back to hive_close, which skips
+    // learning-signal recording entirely.
+    const { hive_create_epic } = await import("./hive");
+    const captureOutcomeSpy = spyOn(evalCapture, "captureSubtaskOutcome");
+
+    const epicResult = await hive_create_epic.execute(
+      {
+        epic_title: "No start time",
+        subtasks: [
+          {
+            title: "Do the thing",
+            priority: 2,
+            files: ["src/thing.ts"],
+          },
+        ],
+      },
+      mockContext,
+    );
+
+    const epicData = JSON.parse(epicResult);
+    const beadId = epicData.subtasks[0].id;
+
+    const result = await swarm_complete.execute(
+      {
+        project_key: testProjectPath,
+        agent_name: "TestAgent",
+        bead_id: beadId,
+        summary: "Did the thing",
+        files_touched: ["src/thing.ts"],
+        skip_verification: true,
+        skip_review: true,
+        // start_time deliberately omitted
+      },
+      mockContext,
+    );
+
+    const parsed = JSON.parse(result);
+    expect(parsed.success).toBe(true);
+    expect(parsed.error).toBeUndefined();
+
+    // Duration falls back to 0 rather than crashing on `Date.now() - undefined`
+    expect(captureOutcomeSpy).toHaveBeenCalledTimes(1);
+    const call = captureOutcomeSpy.mock.calls[0][0];
+    expect(call.durationMs).toBe(0);
+
+    captureOutcomeSpy.mockRestore();
+  });
+
   test("does not call captureSubtaskOutcome when required params missing", async () => {
     const { hive_create_epic } = await import("./hive");
     const captureOutcomeSpy = spyOn(evalCapture, "captureSubtaskOutcome");
@@ -834,8 +885,8 @@ describe("anti-pattern auto-deprecation integration", () => {
 describe("eval_records duration tracking", () => {
   test("duration should be calculated correctly from start_time", () => {
     // This is a unit test for the duration calculation logic
-    // After fix: start_time is REQUIRED, so we always calculate duration
-    
+    // start_time is optional; when provided we still calculate duration from it
+
     const startTime = Date.now() - 5000; // 5 seconds ago
     const completionDurationMs = Date.now() - startTime;
     
@@ -844,22 +895,25 @@ describe("eval_records duration tracking", () => {
     expect(completionDurationMs).toBeLessThan(5500);
   });
   
-  test("swarm_complete requires start_time parameter", () => {
-    // After fix: start_time is no longer optional
+  test("swarm_complete accepts a missing start_time parameter", () => {
+    // start_time is optional: callers who don't know a start time must not be
+    // rejected. A required param that agents can't supply caused a universal
+    // fallback to hive_close (which skips learning-signal recording).
     const { args } = swarm_complete;
-    
-    // Verify start_time is in the schema
+
     expect(args).toHaveProperty("start_time");
-    
-    // Try to parse undefined - should fail since it's required now
-    try {
-      args.start_time.parse(undefined);
-      // If we get here, start_time is optional (which would be wrong)
-      expect(true).toBe(false); // Force fail
-    } catch (error) {
-      // Good - start_time is required
-      expect(error).toBeDefined();
-    }
+
+    // safeParse (not parse/try-catch) so a thrown assertion can't be
+    // swallowed by an enclosing catch block.
+    const result = args.start_time.safeParse(undefined);
+    expect(result.success).toBe(true);
+  });
+
+  test("swarm_complete still validates start_time as a number when provided", () => {
+    const { args } = swarm_complete;
+
+    expect(args.start_time.safeParse(Date.now()).success).toBe(true);
+    expect(args.start_time.safeParse("not-a-number").success).toBe(false);
   });
   
   test("swarm_record_outcome schema requires duration_ms", () => {

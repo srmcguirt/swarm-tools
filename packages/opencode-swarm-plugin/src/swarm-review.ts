@@ -16,7 +16,7 @@
 
 import { tool } from "@opencode-ai/plugin";
 import { z } from "zod";
-import { sendSwarmMessage, type HiveAdapter } from "swarm-mail";
+import { sendSwarmMessage, readEvents, type HiveAdapter } from "swarm-mail";
 import { getHiveAdapter } from "./hive";
 import { captureCoordinatorEvent } from "./eval-capture.js";
 import { traceReviewDecision } from "./decision-trace-integration.js";
@@ -109,44 +109,63 @@ export interface ReviewPromptContext {
 // Review Attempt Tracking
 // ============================================================================
 
-/**
- * In-memory tracking of review attempts per task
- * Key: task_id, Value: attempt count
- */
-const reviewAttempts = new Map<string, number>();
-
 const MAX_REVIEW_ATTEMPTS = 3;
 
 /**
- * Get current attempt count for a task
+ * Fetch review_completed events for a task, oldest to newest.
+ *
+ * Read-through, no cache: coordinators invoke tools by shelling out to a
+ * fresh process per call, so any in-memory Map resets between calls and can
+ * never survive a process boundary. The event log in the durable store
+ * (libSQL) is the only state that does - every swarm_review_feedback call
+ * already appends a review_completed event, so attempt counts are derived
+ * from it rather than tracked separately.
  */
-function getAttemptCount(taskId: string): number {
-  return reviewAttempts.get(taskId) || 0;
+async function getReviewEvents(projectKey: string, taskId: string) {
+  const events = await readEvents(
+    { projectKey, types: ["review_completed"] },
+    projectKey
+  );
+  return events.filter(
+    (
+      e
+    ): e is (typeof events)[number] & {
+      type: "review_completed";
+      epic_id: string;
+      bead_id: string;
+      status: "approved" | "needs_changes" | "blocked";
+      attempt: number;
+    } => e.type === "review_completed" && e.bead_id === taskId
+  );
 }
 
 /**
- * Increment attempt count for a task
- * @returns New attempt count
+ * Count of rejected review attempts for a task - every needs_changes or
+ * blocked review_completed event. Derived state, not a stored counter: it
+ * can't drift, and stays correct even when the same task is reviewed by
+ * separate coordinator processes back to back.
  */
-function incrementAttempt(taskId: string): number {
-  const current = getAttemptCount(taskId);
-  const newCount = current + 1;
-  reviewAttempts.set(taskId, newCount);
-  return newCount;
+export async function getAttemptCount(
+  projectKey: string,
+  taskId: string
+): Promise<number> {
+  const events = await getReviewEvents(projectKey, taskId);
+  return events.filter(
+    (e) => e.status === "needs_changes" || e.status === "blocked"
+  ).length;
 }
 
 /**
- * Clear attempt count (on success or task reset)
+ * Get remaining review attempts (never negative)
  */
-function clearAttempts(taskId: string): void {
-  reviewAttempts.delete(taskId);
-}
-
-/**
- * Get remaining attempts
- */
-function getRemainingAttempts(taskId: string): number {
-  return MAX_REVIEW_ATTEMPTS - getAttemptCount(taskId);
+export async function getRemainingAttempts(
+  projectKey: string,
+  taskId: string
+): Promise<number> {
+  return Math.max(
+    0,
+    MAX_REVIEW_ATTEMPTS - (await getAttemptCount(projectKey, taskId))
+  );
 }
 
 // ============================================================================
@@ -435,7 +454,8 @@ export const swarm_review = tool({
     // Emit ReviewStartedEvent for lifecycle tracking
     try {
       const { createEvent, appendEvent } = await import("swarm-mail");
-      const attempt = getReviewStatus(args.task_id).attempt_count || 1;
+      const attempt =
+        (await getAttemptCount(args.project_key, args.task_id)) || 1;
       const reviewStartedEvent = createEvent("review_started", {
         project_key: args.project_key,
         epic_id: args.epic_id,
@@ -459,7 +479,10 @@ export const swarm_review = tool({
           files_touched: args.files_touched || [],
           completed_dependencies: completedDependencies.length,
           downstream_tasks: downstreamTasks.length,
-          remaining_attempts: getRemainingAttempts(args.task_id),
+          remaining_attempts: await getRemainingAttempts(
+            args.project_key,
+            args.task_id
+          ),
         },
       },
       null,
@@ -523,8 +546,11 @@ export const swarm_review_feedback = tool({
       : args.task_id;
 
     if (args.status === "approved") {
-      // Mark as approved and clear attempts
-      markReviewApproved(args.task_id);
+      // Approval is derived from the review_completed(approved) event
+      // appended below - nothing to mark here. It's a terminal state: once
+      // the most recent review_completed event for this task is "approved",
+      // getReviewStatus reports approved=true regardless of earlier
+      // rejections. There's nothing to reset.
 
       // Capture review approval decision (legacy eval capture)
       try {
@@ -567,7 +593,8 @@ export const swarm_review_feedback = tool({
       // Emit ReviewCompletedEvent for lifecycle tracking
       try {
         const { createEvent, appendEvent } = await import("swarm-mail");
-        const attempt = getReviewStatus(args.task_id).attempt_count || 1;
+        const attempt =
+          (await getAttemptCount(args.project_key, args.task_id)) || 1;
         const reviewCompletedEvent = createEvent("review_completed", {
           project_key: args.project_key,
           epic_id: epicId,
@@ -609,7 +636,16 @@ You may now complete the task with \`swarm_complete\`.`,
     }
 
     // Handle needs_changes
-    const attemptNumber = incrementAttempt(args.task_id);
+    // Read-through, no cache: the attempt count is derived by counting prior
+    // needs_changes/blocked review_completed events for this task rather
+    // than stored in memory. Coordinators invoke tools via a fresh process
+    // per call, so an in-memory counter can't survive between calls - the
+    // durable event log is the only state that can.
+    const priorRejections = await getAttemptCount(
+      args.project_key,
+      args.task_id
+    );
+    const attemptNumber = priorRejections + 1;
     const remaining = MAX_REVIEW_ATTEMPTS - attemptNumber;
 
     // Capture review rejection decision (legacy eval capture)
@@ -741,52 +777,39 @@ interface TaskReviewStatus {
 }
 
 /**
- * In-memory tracking of review status per task
+ * Get durable review status for a task, derived from the review_completed
+ * event log - no cache, no stored counter (see getAttemptCount).
+ *
+ * Approval is a terminal state: once the most recent review_completed event
+ * for this task has status "approved", this reports approved=true regardless
+ * of how many needs_changes events preceded it. There is nothing to reset -
+ * an approval simply ends the review sequence for gating purposes.
  */
-const reviewStatus = new Map<string, { approved: boolean; timestamp: number }>();
-
-/**
- * Mark a task as reviewed and approved
- */
-export function markReviewApproved(taskId: string): void {
-  reviewStatus.set(taskId, { approved: true, timestamp: Date.now() });
-  clearAttempts(taskId);
+export async function getReviewStatus(
+  projectKey: string,
+  taskId: string
+): Promise<TaskReviewStatus> {
+  const events = await getReviewEvents(projectKey, taskId);
+  const attemptCount = events.filter(
+    (e) => e.status === "needs_changes" || e.status === "blocked"
+  ).length;
+  const latest = events[events.length - 1];
+  return {
+    reviewed: events.length > 0,
+    approved: latest?.status === "approved",
+    attempt_count: attemptCount,
+    remaining_attempts: Math.max(0, MAX_REVIEW_ATTEMPTS - attemptCount),
+  };
 }
 
 /**
  * Check if a task has been approved
  */
-export function isReviewApproved(taskId: string): boolean {
-  const status = reviewStatus.get(taskId);
-  return status?.approved ?? false;
-}
-
-/**
- * Get review status for a task
- */
-export function getReviewStatus(taskId: string): TaskReviewStatus {
-  const status = reviewStatus.get(taskId);
-  return {
-    reviewed: status !== undefined,
-    approved: status?.approved ?? false,
-    attempt_count: getAttemptCount(taskId),
-    remaining_attempts: getRemainingAttempts(taskId),
-  };
-}
-
-/**
- * Clear review status (for testing or reset)
- */
-export function clearReviewStatus(taskId: string): void {
-  reviewStatus.delete(taskId);
-  clearAttempts(taskId);
-}
-
-/**
- * Mark a task as reviewed but not approved (for testing)
- */
-export function markReviewRejected(taskId: string): void {
-  reviewStatus.set(taskId, { approved: false, timestamp: Date.now() });
+export async function isReviewApproved(
+  projectKey: string,
+  taskId: string
+): Promise<boolean> {
+  return (await getReviewStatus(projectKey, taskId)).approved;
 }
 
 // ============================================================================

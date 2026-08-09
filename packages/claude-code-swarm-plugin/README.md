@@ -9,10 +9,12 @@ Multi-agent coordination for Claude Code. Enables parallel task decomposition, w
 The plugin delegates to the `swarm` CLI for all operations:
 
 ```bash
-bun add -g opencode-swarm-plugin
+bun add -g opencode-swarm-plugin@npm:@srmcguirt/opencode-swarm-plugin@latest
 # or
-npm install -g opencode-swarm-plugin
+npm install -g opencode-swarm-plugin@npm:@srmcguirt/opencode-swarm-plugin@latest
 ```
+
+The `@npm:@srmcguirt/...` alias is required — the unscoped `opencode-swarm-plugin` name on npmjs belongs to someone else and has shipped broken builds.
 
 Verify installation:
 

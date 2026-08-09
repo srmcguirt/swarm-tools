@@ -11,8 +11,14 @@
 
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
+import { sanitizeForGitExport } from "../export-sanitize.js";
 import type { HiveAdapter } from "../types/hive-adapter.js";
-import { exportDirtyBeads, parseJSONL, serializeToJSONL, type CellExport } from "./jsonl.js";
+import {
+  exportDirtyBeads,
+  parseJSONL,
+  serializeToJSONL,
+  type CellExport,
+} from "./jsonl.js";
 import { clearDirtyBead } from "./projections.js";
 
 export interface FlushManagerOptions {
@@ -122,7 +128,7 @@ export class FlushManager {
       // Export dirty beads
       const { jsonl: dirtyJsonl, cellIds } = await exportDirtyBeads(
         this.adapter,
-        this.projectKey
+        this.projectKey,
       );
 
       if (cellIds.length === 0) {
@@ -155,8 +161,19 @@ export class FlushManager {
         ...dirtyCells,
       ];
 
+      // Sanitize title/description for the git-tracked artifact. Local DB
+      // rows are untouched — this only transforms the in-memory copy about
+      // to be written to disk. See export-sanitize.ts.
+      const sanitizedCells: CellExport[] = mergedCells.map((c) => ({
+        ...c,
+        title: sanitizeForGitExport(c.title) ?? c.title,
+        description: sanitizeForGitExport(c.description),
+      }));
+
       // Serialize merged result
-      const mergedJsonl = mergedCells.map((c) => serializeToJSONL(c)).join("");
+      const mergedJsonl = sanitizedCells
+        .map((c) => serializeToJSONL(c))
+        .join("");
 
       // Write to file
       await writeFile(this.outputPath, mergedJsonl, "utf-8");

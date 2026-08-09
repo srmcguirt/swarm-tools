@@ -17,16 +17,22 @@ import { convertPlaceholders, type DatabaseAdapter } from "../libsql.js";
 import { createHiveAdapter } from "./adapter.js";
 import { FlushManager } from "./flush-manager.js";
 import { parseJSONL } from "./jsonl.js";
-import { beadsMigrationLibSQL, cellsViewMigrationLibSQL, beadsResultColumnsMigrationLibSQL } from "./migrations.js";
+import {
+  beadsMigrationLibSQL,
+  cellsViewMigrationLibSQL,
+  beadsResultColumnsMigrationLibSQL,
+} from "./migrations.js";
 
 /**
  * Wrap libSQL client with DatabaseAdapter interface
  * Uses executeMultiple for exec() to handle multi-statement migrations
- * 
+ *
  * IMPORTANT: Includes getClient() method so toDrizzleDb() recognizes this
  * as a LibSQL adapter (not PGlite).
  */
-function wrapLibSQL(client: Client): DatabaseAdapter & { getClient: () => Client } {
+function wrapLibSQL(
+  client: Client,
+): DatabaseAdapter & { getClient: () => Client } {
   return {
     query: async <T>(sql: string, params?: unknown[]) => {
       const converted = convertPlaceholders(sql, params);
@@ -153,7 +159,7 @@ describe("FlushManager", () => {
     // It should have BOTH cells
     expect(cells.length).toBe(2);
     expect(cells.map((c) => c.id).sort()).toEqual(
-      [existingCell.id, newCell.id].sort()
+      [existingCell.id, newCell.id].sort(),
     );
   });
 
@@ -350,5 +356,103 @@ describe("FlushManager", () => {
 
     // Cleanup
     flushManager.stop();
+  });
+
+  describe("flush() — export sanitization", () => {
+    test("strips internal process vocabulary while keeping technical facts", async () => {
+      const testOutputPath = join(testDir, ".hive", "issues-sanitize-1.jsonl");
+
+      const cell = await adapter.createCell(projectKey, {
+        title: "swarm_complete tool rejects call",
+        type: "bug",
+        priority: 1,
+        description:
+          "The coordinator spawned a subtask to fix the SQL injection in packages/swarm-mail/src/hive/jsonl.ts. Reproduced in 4.2s. See `swarm_complete` for details.",
+      });
+      await adapter.markDirty(projectKey, cell.id);
+
+      const flushManager = new FlushManager({
+        adapter,
+        projectKey,
+        outputPath: testOutputPath,
+      });
+      await flushManager.flush();
+
+      const finalJsonl = await readFile(testOutputPath, "utf-8");
+      const cells = parseJSONL(finalJsonl);
+      const written = cells.find((c) => c.id === cell.id);
+
+      expect(written?.description).not.toMatch(/\bcoordinator\b/i);
+      expect(written?.description).not.toMatch(/\bsubtask\b/i);
+      // technical facts survive
+      expect(written?.description).toContain(
+        "packages/swarm-mail/src/hive/jsonl.ts",
+      );
+      expect(written?.description).toContain("4.2s");
+      expect(written?.description).toContain("swarm_complete");
+    });
+
+    test("running flush twice produces the same sanitized output (idempotent)", async () => {
+      const testOutputPath = join(testDir, ".hive", "issues-sanitize-2.jsonl");
+
+      const cell = await adapter.createCell(projectKey, {
+        title: "Worker agent bug",
+        type: "bug",
+        priority: 2,
+        description:
+          "The worker agent fixed the bug. The swarm coordinator verified it.",
+      });
+      await adapter.markDirty(projectKey, cell.id);
+
+      const flushManager = new FlushManager({
+        adapter,
+        projectKey,
+        outputPath: testOutputPath,
+      });
+      await flushManager.flush();
+      const firstPass = await readFile(testOutputPath, "utf-8");
+
+      // Nothing dirty now, but re-flushing after marking dirty again should
+      // re-sanitize to the same stable output.
+      await adapter.markDirty(projectKey, cell.id);
+      await flushManager.flush();
+      const secondPass = await readFile(testOutputPath, "utf-8");
+
+      expect(secondPass).toBe(firstPass);
+    });
+
+    test("local DB row (title/description) is never mutated by export sanitization", async () => {
+      const testOutputPath = join(testDir, ".hive", "issues-sanitize-3.jsonl");
+
+      const rawTitle = "Worker agent bug in swarm coordinator";
+      const rawDescription =
+        "The worker agent fixed the bug. The swarm coordinator verified it via swarm_complete.";
+
+      const cell = await adapter.createCell(projectKey, {
+        title: rawTitle,
+        type: "bug",
+        priority: 2,
+        description: rawDescription,
+      });
+      await adapter.markDirty(projectKey, cell.id);
+
+      const flushManager = new FlushManager({
+        adapter,
+        projectKey,
+        outputPath: testOutputPath,
+      });
+      await flushManager.flush();
+
+      const dbCell = await adapter.getCell(projectKey, cell.id);
+      expect(dbCell?.title).toBe(rawTitle);
+      expect(dbCell?.description).toBe(rawDescription);
+
+      // Meanwhile the exported file *is* sanitized.
+      const finalJsonl = await readFile(testOutputPath, "utf-8");
+      const cells = parseJSONL(finalJsonl);
+      const written = cells.find((c) => c.id === cell.id);
+      expect(written?.title).not.toMatch(/\bworker\b/i);
+      expect(written?.description).not.toMatch(/\bcoordinator\b/i);
+    });
   });
 });
