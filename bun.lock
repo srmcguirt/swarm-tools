@@ -67,8 +67,8 @@
         "@libsql/client": "^0.15.15",
         "@modelcontextprotocol/sdk": "1.25.2",
         "@opencode-ai/plugin": "^1.0.134",
-        "@srmcguirt/doc-service": "^0.1.0",
-        "@srmcguirt/hive-doc-adapter": "^0.1.1",
+        "@srmcguirt/doc-service": "^0.2.0",
+        "@srmcguirt/hive-doc-adapter": "^0.1.2",
         "effect": "^3.19.12",
         "gray-matter": "^4.0.3",
         "ioredis": "^5.4.1",
@@ -803,9 +803,9 @@
 
     "@shikijs/vscode-textmate": ["@shikijs/vscode-textmate@10.0.2", "", {}, "sha512-83yeghZ2xxin3Nj8z1NMd/NCuca+gsYXswywDy5bHvwlWL8tpTQmzGeUuHd9FC3E/SBEMvzJRwWEOz5gGes9Qg=="],
 
-    "@srmcguirt/doc-service": ["@srmcguirt/doc-service@0.1.0", "https://npm.pkg.github.com/download/@srmcguirt/doc-service/0.1.0/d486e57530f69df317388316d3cb9069eff362ce", { "dependencies": { "zod": "^3.24.1" } }, "sha512-2JLJV11A0257h+ZshkTAo3cbG7PkI3XPpN02/Xh7j+WL57CFZXucq233CRtR8XdMzs/nn1Ir7BzX7MZ2jqnFvQ=="],
+    "@srmcguirt/doc-service": ["@srmcguirt/doc-service@0.2.0", "https://npm.pkg.github.com/download/@srmcguirt/doc-service/0.2.0/833582df93760edaf62865c5f80364bd093552cc", { "dependencies": { "zod": "^3.24.1" } }, "sha512-P2/keF7PyLalZg0MO6ZTPVSNPdumeHou4NayuWKyZiVJ8Hesz/RAe1Cq/ILBDOzQrn1OFjH+j9C0GUrO8l5sRQ=="],
 
-    "@srmcguirt/hive-doc-adapter": ["@srmcguirt/hive-doc-adapter@0.1.1", "https://npm.pkg.github.com/download/@srmcguirt/hive-doc-adapter/0.1.1/e59542bfb0106cb8bb852b4faa3691aeb9d95c94", { "dependencies": { "@libsql/client": "^0.15.15", "@srmcguirt/doc-service": "^0.1.0" } }, "sha512-ahYEA7C3q0L5VYOVgi1AB1brbZ170If0IfjCjjVB2l+RDKyffqMkAqR97GLI3nqtcHOMJ+31SijMu28lnl5cTw=="],
+    "@srmcguirt/hive-doc-adapter": ["@srmcguirt/hive-doc-adapter@0.1.2", "https://npm.pkg.github.com/download/@srmcguirt/hive-doc-adapter/0.1.2/390d83732eef355080ce1e27dfa1ab2d6e31541d", { "dependencies": { "@libsql/client": "^0.15.15", "@srmcguirt/doc-service": "^0.2.0" } }, "sha512-qs9Oux4T0mclyvwYORosc/QqvF/PmQFEPxiGeswmxu7FIhAom5mpjHNsZXz0UJ7hyp+PEo6qkEqtCrlT6ohHGQ=="],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.0.0", "", {}, "sha512-m2bOd0f2RT9k8QJx1JN85cZYyH1RqFBdlwtkSlf4tBDYLCiiZnv1fIIwacK6cqwXavOydf0NPToMQgpKq+dVlA=="],
 

@@ -178,7 +178,9 @@ describe('generateDocs - non-empty corpus', () => {
     expect(result.deliverables.wiki).toBeUndefined();
     expect(result.deliverables.blog).toBeUndefined();
     expect(result.deliverables.policy).toBeUndefined();
-    expect(existsSync(join(dir, 'docs', 'runbooks', 'index.md'))).toBe(true);
+    expect(
+      existsSync(join(dir, 'docs', 'generated', 'runbooks', 'index.md')),
+    ).toBe(true);
   });
 
   test('writes a fingerprint stamp matching the post-extract corpus state', async () => {

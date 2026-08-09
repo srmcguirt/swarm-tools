@@ -155,6 +155,6 @@ describe('resolveDocsConfig - with docsmith.json', () => {
     const resolved = resolveDocsConfig(dir);
     expect(resolved.projectConfig.paths.root).toBe('documentation');
     // Unset path fields keep doc-service's own defaults.
-    expect(resolved.projectConfig.paths.wiki).toBe('docs/wiki');
+    expect(resolved.projectConfig.paths.wiki).toBe('docs/generated/wiki');
   });
 });
