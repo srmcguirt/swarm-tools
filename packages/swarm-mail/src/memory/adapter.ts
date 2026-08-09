@@ -107,7 +107,12 @@ import {
   type Relationship,
 } from "../db/schema/memory.js";
 import { createMemoryStore, type Memory, type SearchResult } from "./store.js";
-import { makeOllamaLive, Ollama, type MemoryConfig } from "./ollama.js";
+import {
+  makeOllamaLive,
+  Ollama,
+  getContextLength,
+  type MemoryConfig,
+} from "./ollama.js";
 import {
   resolveStoreScope,
   type MemoryScope,
@@ -216,11 +221,13 @@ export interface HealthStatus {
 // ============================================================================
 
 /**
- * Maximum characters per chunk (conservative for ~6k tokens with mxbai-embed-large)
- * mxbai-embed-large has ~512 token limit, but we use a more conservative 24k chars
- * to handle various content types safely.
+ * Chars-per-token used to derive the chunk threshold from the model's
+ * context length. Deliberately conservative (English prose averages ~4
+ * chars/token) since code and punctuation-heavy content tokenizes denser,
+ * and undercounting here only chunks earlier than strictly necessary -
+ * overcounting risks Ollama silently truncating the embedding input.
  */
-const MAX_CHARS_PER_CHUNK = 24000;
+const CHARS_PER_TOKEN = 3;
 
 /**
  * Chunk overlap for context continuity
@@ -271,6 +278,12 @@ export function createMemoryAdapter(
   const ollamaLayer = makeOllamaLive(config);
   const projectPath = adapterOptions.projectPath ?? process.cwd();
 
+  // Derived from the configured model's context length so swapping models
+  // (e.g. mxbai-embed-large -> nomic-embed-text) moves the chunk threshold
+  // automatically instead of drifting out of sync with a hardcoded value.
+  const maxCharsPerChunk =
+    getContextLength(config.ollamaModel) * CHARS_PER_TOKEN;
+
   // "auto" scope resolution shells out to git - memoize per adapter
   // instance so repeated store()/find() calls don't re-spawn it.
   let cachedAutoScope: MemoryScope | undefined;
@@ -292,13 +305,13 @@ export function createMemoryAdapter(
    */
   const generateEmbedding = async (text: string): Promise<number[] | null> => {
     // Check if text needs chunking
-    if (text.length > MAX_CHARS_PER_CHUNK) {
+    if (text.length > maxCharsPerChunk) {
       console.warn(
-        `⚠️  Text length (${text.length} chars) exceeds limit (${MAX_CHARS_PER_CHUNK} chars). ` +
+        `⚠️  Text length (${text.length} chars) exceeds limit (${maxCharsPerChunk} chars). ` +
           `Auto-chunking into smaller segments for embedding.`,
       );
 
-      const chunks = chunkText(text, MAX_CHARS_PER_CHUNK, CHUNK_OVERLAP);
+      const chunks = chunkText(text, maxCharsPerChunk, CHUNK_OVERLAP);
       const embeddings: number[][] = [];
 
       // Generate embedding for each chunk

@@ -91,6 +91,50 @@ export const EMBEDDING_DIM = getEmbeddingDimension(
 );
 
 /**
+ * Known context length (in tokens) for Ollama embedding models.
+ * Map model name to max context window.
+ *
+ * mxbai-embed-large and nomic-embed-text verified via `ollama show <model>`
+ * (Model > "context length" field, not the inflated `num_ctx` parameter).
+ * all-minilm and snowflake-arctic-embed are published model-card values.
+ */
+const MODEL_CONTEXT_LENGTHS: Record<string, number> = {
+	"mxbai-embed-large": 512,
+	"nomic-embed-text": 2048,
+	"all-minilm": 256,
+	"snowflake-arctic-embed": 512,
+};
+
+/**
+ * Get context length (in tokens) for a model.
+ * Checks env var first (OLLAMA_CONTEXT_LENGTH), then MODEL_CONTEXT_LENGTHS map.
+ * Falls back to 512 (mxbai-embed-large's window) for unknown models - the
+ * conservative choice, since underestimating just chunks earlier than
+ * necessary, while overestimating risks silent truncation by Ollama.
+ *
+ * @param model - Model name (e.g., "mxbai-embed-large", "nomic-embed-text")
+ * @returns Context length in tokens
+ *
+ * @example
+ * ```ts
+ * getContextLength("mxbai-embed-large") // => 512
+ * getContextLength("nomic-embed-text")  // => 2048
+ * getContextLength("unknown-model")     // => 512 (default)
+ * ```
+ */
+export function getContextLength(model: string): number {
+	const envCtx = process.env.OLLAMA_CONTEXT_LENGTH;
+	if (envCtx) {
+		const parsed = Number.parseInt(envCtx, 10);
+		if (!Number.isNaN(parsed) && parsed > 0) {
+			return parsed;
+		}
+	}
+
+	return MODEL_CONTEXT_LENGTHS[model] ?? 512;
+}
+
+/**
  * Ollama operation failure
  */
 export class OllamaError extends Schema.TaggedError<OllamaError>()(

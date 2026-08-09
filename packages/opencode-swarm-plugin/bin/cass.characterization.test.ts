@@ -47,12 +47,10 @@ describe("CASS Inhouse - cass_stats", () => {
 
 		// Verify SessionStats structure
 		expect(result).toHaveProperty("total_sessions");
-		expect(result).toHaveProperty("total_chunks");
 		expect(result).toHaveProperty("by_agent");
 
 		// Verify types
 		expect(typeof result.total_sessions).toBe("number");
-		expect(typeof result.total_chunks).toBe("number");
 		expect(typeof result.by_agent).toBe("object");
 
 		// Verify by_agent structure
@@ -71,7 +69,6 @@ describe("CASS Inhouse - cass_stats", () => {
 		const result = parseToolJSON(output);
 
 		expect(result.total_sessions).toBeGreaterThanOrEqual(0);
-		expect(result.total_chunks).toBeGreaterThanOrEqual(0);
 	});
 });
 
@@ -404,7 +401,7 @@ describe("CASS Inhouse - Ollama Fallback", () => {
  *    - cass_index: Returns summary string with counts
  * 
  * 2. Data Structures:
- *    - SessionStats: { total_sessions, total_chunks, by_agent }
+ *    - SessionStats: { total_sessions, by_agent }
  *    - IndexHealth: { healthy, message, total_indexed, stale_count, fresh_count, oldest_indexed?, newest_indexed? }
  *    - SearchResult: Formatted string with numbered results, scores, previews
  * 

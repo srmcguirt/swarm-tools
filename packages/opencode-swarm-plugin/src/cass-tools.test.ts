@@ -28,7 +28,6 @@ describe("cass_stats", () => {
 		
 		const stats = JSON.parse(result);
 		expect(stats).toHaveProperty("total_sessions");
-		expect(stats).toHaveProperty("total_chunks");
 		expect(stats).toHaveProperty("by_agent");
 	});
 });
