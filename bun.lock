@@ -58,7 +58,7 @@
     },
     "packages/opencode-swarm-plugin": {
       "name": "opencode-swarm-plugin",
-      "version": "0.63.2",
+      "version": "0.63.5",
       "bin": {
         "swarm": "./dist/bin/swarm.js",
       },
@@ -148,7 +148,7 @@
     },
     "packages/swarm-mail": {
       "name": "swarm-mail",
-      "version": "1.11.2",
+      "version": "1.11.5",
       "bin": {
         "swarm-mail-daemon": "./bin/daemon-cli.ts",
         "swarm-db": "./bin/swarm-db.ts",
