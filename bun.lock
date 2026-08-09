@@ -64,8 +64,11 @@
       },
       "dependencies": {
         "@clack/prompts": "^0.11.0",
+        "@libsql/client": "^0.15.15",
         "@modelcontextprotocol/sdk": "1.25.2",
         "@opencode-ai/plugin": "^1.0.134",
+        "@srmcguirt/doc-service": "^0.1.0",
+        "@srmcguirt/hive-doc-adapter": "^0.1.1",
         "effect": "^3.19.12",
         "gray-matter": "^4.0.3",
         "ioredis": "^5.4.1",
@@ -78,7 +81,6 @@
         "zod": "4.1.8",
       },
       "devDependencies": {
-        "@libsql/client": "^0.15.15",
         "@types/bun": "latest",
         "@types/minimatch": "^6.0.0",
         "ai": "6.0.0-beta.150",
@@ -800,6 +802,10 @@
     "@shikijs/types": ["@shikijs/types@3.20.0", "", { "dependencies": { "@shikijs/vscode-textmate": "^10.0.2", "@types/hast": "^3.0.4" } }, "sha512-lhYAATn10nkZcBQ0BlzSbJA3wcmL5MXUUF8d2Zzon6saZDlToKaiRX60n2+ZaHJCmXEcZRWNzn+k9vplr8Jhsw=="],
 
     "@shikijs/vscode-textmate": ["@shikijs/vscode-textmate@10.0.2", "", {}, "sha512-83yeghZ2xxin3Nj8z1NMd/NCuca+gsYXswywDy5bHvwlWL8tpTQmzGeUuHd9FC3E/SBEMvzJRwWEOz5gGes9Qg=="],
+
+    "@srmcguirt/doc-service": ["@srmcguirt/doc-service@0.1.0", "https://npm.pkg.github.com/download/@srmcguirt/doc-service/0.1.0/d486e57530f69df317388316d3cb9069eff362ce", { "dependencies": { "zod": "^3.24.1" } }, "sha512-2JLJV11A0257h+ZshkTAo3cbG7PkI3XPpN02/Xh7j+WL57CFZXucq233CRtR8XdMzs/nn1Ir7BzX7MZ2jqnFvQ=="],
+
+    "@srmcguirt/hive-doc-adapter": ["@srmcguirt/hive-doc-adapter@0.1.1", "https://npm.pkg.github.com/download/@srmcguirt/hive-doc-adapter/0.1.1/e59542bfb0106cb8bb852b4faa3691aeb9d95c94", { "dependencies": { "@libsql/client": "^0.15.15", "@srmcguirt/doc-service": "^0.1.0" } }, "sha512-ahYEA7C3q0L5VYOVgi1AB1brbZ170If0IfjCjjVB2l+RDKyffqMkAqR97GLI3nqtcHOMJ+31SijMu28lnl5cTw=="],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.0.0", "", {}, "sha512-m2bOd0f2RT9k8QJx1JN85cZYyH1RqFBdlwtkSlf4tBDYLCiiZnv1fIIwacK6cqwXavOydf0NPToMQgpKq+dVlA=="],
 
@@ -2514,6 +2520,8 @@
     "@radix-ui/react-popover/@radix-ui/react-slot": ["@radix-ui/react-slot@1.2.3", "", { "dependencies": { "@radix-ui/react-compose-refs": "1.1.2" }, "peerDependencies": { "@types/react": "*", "react": "^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc" }, "optionalPeers": ["@types/react"] }, "sha512-aeNmHnBxbi2St0au6VBVC7JXFlhLlOnvIIlePNniyUNAClzmtAUEY8/pBiK3iHjufOlwA+c20/8jngo7xcrg8A=="],
 
     "@radix-ui/react-primitive/@radix-ui/react-slot": ["@radix-ui/react-slot@1.2.3", "", { "dependencies": { "@radix-ui/react-compose-refs": "1.1.2" }, "peerDependencies": { "@types/react": "*", "react": "^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc" }, "optionalPeers": ["@types/react"] }, "sha512-aeNmHnBxbi2St0au6VBVC7JXFlhLlOnvIIlePNniyUNAClzmtAUEY8/pBiK3iHjufOlwA+c20/8jngo7xcrg8A=="],
+
+    "@srmcguirt/doc-service/zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 
     "@tailwindcss/oxide-wasm32-wasi/@emnapi/core": ["@emnapi/core@1.7.1", "", { "dependencies": { "@emnapi/wasi-threads": "1.1.0", "tslib": "^2.4.0" }, "bundled": true }, "sha512-o1uhUASyo921r2XtHYOHy7gdkGLge8ghBEQHMWmyJFoXlpU58kIrhhN3w26lpQb6dspetweapMn2CSNwQ8I4wg=="],
 

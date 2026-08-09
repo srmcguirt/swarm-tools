@@ -20,45 +20,46 @@
  * import { hiveTools, beadsTools, agentMailTools, swarmMailTools } from "opencode-swarm-plugin"
  * ```
  */
-import type { Plugin, PluginInput, Hooks } from "@opencode-ai/plugin";
+import type { Plugin, PluginInput, Hooks } from '@opencode-ai/plugin';
 
 import {
   hiveTools,
   beadsTools,
   setHiveWorkingDirectory,
   setBeadsWorkingDirectory,
-} from "./hive";
+} from './hive';
 import {
   agentMailTools,
   setAgentMailProjectDirectory,
   type AgentMailState,
   AGENT_MAIL_URL,
-} from "./agent-mail";
+} from './agent-mail';
 import {
   swarmMailTools,
   setSwarmMailProjectDirectory,
   type SwarmMailState,
-} from "./swarm-mail";
-import { structuredTools } from "./structured";
-import { swarmTools } from "./swarm";
-import { worktreeTools } from "./swarm-worktree";
-import { reviewTools } from "./swarm-review";
-import { repoCrawlTools } from "./repo-crawl";
-import { skillsTools, setSkillsProjectDirectory } from "./skills";
-import { mandateTools } from "./mandates";
-import { hivemindTools } from "./hivemind-tools";
-import { observabilityTools } from "./observability-tools";
-import { researchTools } from "./swarm-research";
-import { queueTools } from "./queue-tools";
+} from './swarm-mail';
+import { structuredTools } from './structured';
+import { swarmTools } from './swarm';
+import { worktreeTools } from './swarm-worktree';
+import { reviewTools } from './swarm-review';
+import { repoCrawlTools } from './repo-crawl';
+import { skillsTools, setSkillsProjectDirectory } from './skills';
+import { mandateTools } from './mandates';
+import { hivemindTools } from './hivemind-tools';
+import { observabilityTools } from './observability-tools';
+import { researchTools } from './swarm-research';
+import { queueTools } from './queue-tools';
+import { docsTools, setDocsWorkingDirectory } from './docs/index.js';
 // NOTE: evalTools removed from main bundle - evalite is a devDependency
 // Use `bunx evalite run` directly for running evals
 // import { evalTools } from "./eval-runner";
-import { contributorTools } from "./contributor-tools";
+import { contributorTools } from './contributor-tools';
 import {
   guardrailOutput,
   DEFAULT_GUARDRAIL_CONFIG,
   type GuardrailResult,
-} from "./output-guardrails";
+} from './output-guardrails';
 import {
   analyzeTodoWrite,
   shouldAnalyzeTool,
@@ -67,10 +68,10 @@ import {
   getCoordinatorContext,
   setCoordinatorContext,
   clearCoordinatorContext,
-} from "./planning-guardrails";
-import { checkCoordinatorGuard } from "./coordinator-guard";
-import { createCompactionHook } from "./compaction-hook";
-import { runConfigBootstrap } from "./config-bootstrap";
+} from './planning-guardrails';
+import { checkCoordinatorGuard } from './coordinator-guard';
+import { createCompactionHook } from './compaction-hook';
+import { runConfigBootstrap } from './config-bootstrap';
 
 /**
  * OpenCode Swarm Plugin
@@ -101,6 +102,9 @@ const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
   // Set the project directory for skills discovery
   // Skills are discovered from .opencode/skills/, .claude/skills/, or skills/
   setSkillsProjectDirectory(directory);
+
+  // Set the project directory for docs generation/staleness-check tools
+  setDocsWorkingDirectory(directory);
 
   // Set the project directory for Agent Mail (legacy MCP-based)
   // This ensures agentmail_init uses the correct project path by default
@@ -140,14 +144,14 @@ const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
 
     try {
       const response = await fetch(`${AGENT_MAIL_URL}/mcp/`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          jsonrpc: "2.0",
+          jsonrpc: '2.0',
           id: crypto.randomUUID(),
-          method: "tools/call",
+          method: 'tools/call',
           params: {
-            name: "release_file_reservations",
+            name: 'release_file_reservations',
             arguments: {
               project_key: activeAgentMailState.projectKey,
               agent_name: activeAgentMailState.agentName,
@@ -207,7 +211,7 @@ const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
      */
     event: async ({ event }) => {
       // Auto-release reservations on session idle
-      if (event.type === "session.idle") {
+      if (event.type === 'session.idle') {
         await releaseReservations();
       }
     },
@@ -220,9 +224,9 @@ const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
      * - Coordinator editing files directly (should spawn workers)
      * - Coordinator running tests (workers should run tests)
      */
-    "tool.execute.before": async (input, output) => {
+    'tool.execute.before': async (input, output) => {
       const toolName = input.tool;
-      const sessionId = input.sessionID || "unknown";
+      const sessionId = input.sessionID || 'unknown';
 
       // Check for planning anti-patterns
       if (shouldAnalyzeTool(toolName)) {
@@ -234,7 +238,7 @@ const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
 
       // Activate coordinator context when swarm tools are used
       // MUST happen BEFORE violation check so violations can be detected
-      if (toolName === "hive_create_epic" || toolName === "swarm_decompose") {
+      if (toolName === 'hive_create_epic' || toolName === 'swarm_decompose') {
         setCoordinatorContext({
           isCoordinator: true,
           sessionId,
@@ -244,8 +248,8 @@ const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
       // Detect coordinator by Task tool spawning swarm-worker agent
       const taskArgs = output.args as { subagent_type?: string } | undefined;
       if (
-        toolName === "task" &&
-        taskArgs?.subagent_type?.toLowerCase().includes("swarm")
+        toolName === 'task' &&
+        taskArgs?.subagent_type?.toLowerCase().includes('swarm')
       ) {
         setCoordinatorContext({
           isCoordinator: true,
@@ -260,7 +264,7 @@ const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
 
         // ENFORCE coordinator guard (blocks violations)
         const guardResult = checkCoordinatorGuard({
-          agentContext: "coordinator",
+          agentContext: 'coordinator',
           toolName,
           toolArgs: output.args as Record<string, unknown>,
         });
@@ -273,10 +277,10 @@ const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
         // Also capture violations for analytics (warnings only)
         const violation = detectCoordinatorViolation({
           sessionId,
-          epicId: ctx.epicId || "unknown",
+          epicId: ctx.epicId || 'unknown',
           toolName,
           toolArgs: output.args as Record<string, unknown>,
-          agentContext: "coordinator",
+          agentContext: 'coordinator',
         });
 
         if (violation.isViolation) {
@@ -285,7 +289,7 @@ const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
       }
 
       // Capture epic ID when epic is created
-      if (toolName === "hive_create_epic" && output.args) {
+      if (toolName === 'hive_create_epic' && output.args) {
         const args = output.args as { epic_title?: string };
         // Epic ID will be set after execution in tool.execute.after
       }
@@ -298,12 +302,12 @@ const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
      * - Auto-releases file reservations after swarm:complete or hive:close
      * - Auto-syncs cells after closing
      */
-    "tool.execute.after": async (input, output) => {
+    'tool.execute.after': async (input, output) => {
       const toolName = input.tool;
 
       // Apply output guardrails to prevent context blowout
       // Skip if output is empty or tool is in skip list
-      if (output.output && typeof output.output === "string") {
+      if (output.output && typeof output.output === 'string') {
         const guardrailResult = guardrailOutput(toolName, output.output);
         if (guardrailResult.truncated) {
           output.output = guardrailResult.output;
@@ -311,12 +315,12 @@ const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
       }
 
       // Track Agent Mail state for cleanup
-      if (toolName === "agentmail_init" && output.output) {
+      if (toolName === 'agentmail_init' && output.output) {
         try {
           const result = JSON.parse(output.output);
           if (result.agent) {
             activeAgentMailState = {
-              projectKey: result.project?.human_key || "",
+              projectKey: result.project?.human_key || '',
               agentName: result.agent.name,
               reservations: [],
               startedAt: new Date().toISOString(),
@@ -329,7 +333,7 @@ const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
 
       // Track reservations from output
       if (
-        toolName === "agentmail_reserve" &&
+        toolName === 'agentmail_reserve' &&
         output.output &&
         activeAgentMailState
       ) {
@@ -342,12 +346,12 @@ const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
       }
 
       // Auto-release after swarm:complete
-      if (toolName === "swarm_complete" && activeAgentMailState) {
+      if (toolName === 'swarm_complete' && activeAgentMailState) {
         await releaseReservations();
       }
 
       // Capture epic ID when epic is created (for coordinator context)
-      if (toolName === "hive_create_epic" && output.output) {
+      if (toolName === 'hive_create_epic' && output.output) {
         try {
           const result = JSON.parse(output.output);
           if (result.epic?.id) {
@@ -363,9 +367,9 @@ const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
       }
 
       // Clear coordinator context when epic is closed
-      const sessionId = input.sessionID || "unknown";
+      const sessionId = input.sessionID || 'unknown';
       if (
-        toolName === "hive_close" &&
+        toolName === 'hive_close' &&
         output.output &&
         isInCoordinatorContext(sessionId)
       ) {
@@ -390,12 +394,12 @@ const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
       // Pattern: dynamic import + try-catch + non-fatal (eval capture never blocks tool execution)
 
       const ctx = getCoordinatorContext();
-      const epicId = ctx.epicId || "unknown";
+      const epicId = ctx.epicId || 'unknown';
 
       // captureResearcherSpawned - Task tool with researcher subagent
       // Note: In after hook, we only have output - args are not available
       // We detect researcher tasks by checking the output for researcher-related content
-      if (toolName === "task") {
+      if (toolName === 'task') {
         try {
           const result = output.output ? JSON.parse(output.output) : {};
           // Check if this was a researcher task by looking at the result
@@ -405,13 +409,13 @@ const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
             result.tools_used
           ) {
             const { captureResearcherSpawned } = await import(
-              "./eval-capture.js"
+              './eval-capture.js'
             );
             await captureResearcherSpawned({
               session_id: input.sessionID,
               epic_id: epicId,
-              researcher_id: result.researcher_id || "unknown",
-              research_topic: result.research_topic || "unknown",
+              researcher_id: result.researcher_id || 'unknown',
+              research_topic: result.research_topic || 'unknown',
               tools_used: result.tools_used || [],
             });
           }
@@ -423,11 +427,11 @@ const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
 
       // captureSkillLoaded - skills_use tool
       // Note: In after hook, we extract skill info from the output
-      if (toolName === "skills_use") {
+      if (toolName === 'skills_use') {
         try {
-          const { captureSkillLoaded } = await import("./eval-capture.js");
+          const { captureSkillLoaded } = await import('./eval-capture.js');
           const result = output.output ? JSON.parse(output.output) : {};
-          const skillName = result.skill_name || result.name || "unknown";
+          const skillName = result.skill_name || result.name || 'unknown';
           const context = result.context;
           await captureSkillLoaded({
             session_id: input.sessionID,
@@ -441,9 +445,9 @@ const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
       }
 
       // captureInboxChecked - swarmmail_inbox tool
-      if (toolName === "swarmmail_inbox") {
+      if (toolName === 'swarmmail_inbox') {
         try {
-          const { captureInboxChecked } = await import("./eval-capture.js");
+          const { captureInboxChecked } = await import('./eval-capture.js');
           const result = output.output ? JSON.parse(output.output) : {};
           await captureInboxChecked({
             session_id: input.sessionID,
@@ -452,48 +456,48 @@ const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
             urgent_count: result.urgent_count || 0,
           });
         } catch (err) {
-          console.warn("[eval-capture] captureInboxChecked failed:", err);
+          console.warn('[eval-capture] captureInboxChecked failed:', err);
         }
       }
 
       // captureBlockerResolved + captureBlockerDetected - hive_update tool
       // Note: In after hook, we extract all info from the output result
-      if (toolName === "hive_update") {
+      if (toolName === 'hive_update') {
         try {
           const result = output.output ? JSON.parse(output.output) : {};
           const newStatus = result.status;
           const previousStatus = result.previous_status;
 
           // captureBlockerResolved - status changed FROM blocked
-          if (previousStatus === "blocked" && newStatus !== "blocked") {
+          if (previousStatus === 'blocked' && newStatus !== 'blocked') {
             const { captureBlockerResolved } = await import(
-              "./eval-capture.js"
+              './eval-capture.js'
             );
             await captureBlockerResolved({
               session_id: input.sessionID,
               epic_id: epicId,
-              worker_id: result.worker_id || "unknown",
-              subtask_id: result.id || "unknown",
-              blocker_type: result.blocker_type || "unknown",
-              resolution: result.resolution || "Status changed to " + newStatus,
+              worker_id: result.worker_id || 'unknown',
+              subtask_id: result.id || 'unknown',
+              blocker_type: result.blocker_type || 'unknown',
+              resolution: result.resolution || 'Status changed to ' + newStatus,
             });
           }
 
           // captureBlockerDetected - status changed TO blocked
-          if (newStatus === "blocked" && previousStatus !== "blocked") {
+          if (newStatus === 'blocked' && previousStatus !== 'blocked') {
             const { captureBlockerDetected } = await import(
-              "./eval-capture.js"
+              './eval-capture.js'
             );
             await captureBlockerDetected({
               session_id: input.sessionID,
               epic_id: epicId,
-              worker_id: result.worker_id || "unknown",
-              subtask_id: result.id || "unknown",
-              blocker_type: result.blocker_type || "unknown",
+              worker_id: result.worker_id || 'unknown',
+              subtask_id: result.id || 'unknown',
+              blocker_type: result.blocker_type || 'unknown',
               blocker_description:
                 result.blocker_description ||
                 result.description ||
-                "No description provided",
+                'No description provided',
             });
           }
         } catch (err) {
@@ -503,7 +507,7 @@ const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
 
       // captureScopeChangeDecision - swarmmail_send with "Scope Change" in subject
       // Note: In after hook, we detect scope change from the output
-      if (toolName === "swarmmail_send") {
+      if (toolName === 'swarmmail_send') {
         try {
           const result = output.output ? JSON.parse(output.output) : {};
           // Check if this was a scope change message by looking at the result
@@ -513,15 +517,15 @@ const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
             result.new_scope
           ) {
             const { captureScopeChangeDecision } = await import(
-              "./eval-capture.js"
+              './eval-capture.js'
             );
             const threadId = result.thread_id || epicId;
 
             await captureScopeChangeDecision({
               session_id: input.sessionID,
               epic_id: threadId,
-              worker_id: result.worker_id || "unknown",
-              subtask_id: result.subtask_id || "unknown",
+              worker_id: result.worker_id || 'unknown',
+              subtask_id: result.subtask_id || 'unknown',
               approved: result.approved ?? false,
               original_scope: result.original_scope,
               new_scope: result.new_scope,
@@ -548,9 +552,9 @@ const SwarmPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
      *
      * Note: This hook is experimental and may not be in the published Hooks type yet.
      */
-    "experimental.session.compacting": createCompactionHook(client),
+    'experimental.session.compacting': createCompactionHook(client),
   } as Hooks & {
-    "experimental.session.compacting"?: (
+    'experimental.session.compacting'?: (
       input: { sessionID: string },
       output: { context: string[] },
     ) => Promise<void>;
@@ -574,7 +578,7 @@ export default SwarmPlugin;
 /**
  * Re-export all schemas for type-safe usage
  */
-export * from "./schemas";
+export * from './schemas';
 
 /**
  * Re-export hive module (primary) and beads module (deprecated aliases)
@@ -588,7 +592,7 @@ export * from "./schemas";
  *
  * DEPRECATED: Use hive_* tools instead of beads_* tools
  */
-export * from "./hive";
+export * from './hive';
 
 /**
  * Re-export agent-mail module (legacy MCP-based)
@@ -615,7 +619,7 @@ export {
   isProjectNotFoundError,
   isAgentNotFoundError,
   type AgentMailState,
-} from "./agent-mail";
+} from './agent-mail';
 
 /**
  * Re-export swarm-mail module (embedded event-sourced)
@@ -639,7 +643,7 @@ export {
   getSwarmMailProjectDirectory,
   clearSessionState,
   type SwarmMailState,
-} from "./swarm-mail";
+} from './swarm-mail';
 
 /**
  * Re-export shared types from swarm-mail package
@@ -647,7 +651,7 @@ export {
  * Includes:
  * - MailSessionState - Shared session state type for Agent Mail and Swarm Mail
  */
-export { type MailSessionState } from "swarm-mail";
+export { type MailSessionState } from 'swarm-mail';
 
 /**
  * Re-export structured module
@@ -661,7 +665,7 @@ export {
   extractJsonFromText,
   formatZodErrors,
   getSchemaByName,
-} from "./structured";
+} from './structured';
 
 /**
  * Re-export swarm module
@@ -694,7 +698,7 @@ export {
   formatStrategyGuidelines,
   type DecompositionStrategy,
   type StrategyDefinition,
-} from "./swarm";
+} from './swarm';
 
 // =============================================================================
 // Unified Tool Registry for CLI
@@ -724,6 +728,7 @@ export const allTools = {
   ...researchTools,
   ...queueTools,
   ...contributorTools,
+  ...docsTools,
 } as const;
 
 /**
@@ -759,7 +764,7 @@ export {
   type StorageConfig,
   type StorageBackend,
   type StorageCollections,
-} from "./storage";
+} from './storage';
 
 /**
  * Re-export tool-availability module
@@ -789,7 +794,7 @@ export {
   type ToolName,
   type ToolStatus,
   type ToolAvailability,
-} from "./tool-availability";
+} from './tool-availability';
 
 /**
  * Re-export repo-crawl module
@@ -805,7 +810,7 @@ export {
  * - Tech stack detection from file patterns
  * - Graceful rate limit handling
  */
-export { repoCrawlTools, RepoCrawlError } from "./repo-crawl";
+export { repoCrawlTools, RepoCrawlError } from './repo-crawl';
 
 /**
  * Re-export skills module
@@ -835,7 +840,7 @@ export {
   type Skill,
   type SkillMetadata,
   type SkillRef,
-} from "./skills";
+} from './skills';
 
 /**
  * Re-export mandates module
@@ -857,7 +862,7 @@ export {
  * - MandateEntry, Vote, MandateScore - Core data types
  * - MandateStatus, MandateContentType - Enum types
  */
-export { mandateTools, MandateError } from "./mandates";
+export { mandateTools, MandateError } from './mandates';
 
 /**
  * Re-export mandate-storage module
@@ -886,7 +891,7 @@ export {
   type MandateStorageConfig,
   type MandateStorageBackend,
   type MandateStorageCollections,
-} from "./mandate-storage";
+} from './mandate-storage';
 
 /**
  * Re-export mandate-promotion module
@@ -908,7 +913,7 @@ export {
   getStatusChanges,
   groupByTransition,
   type PromotionResult,
-} from "./mandate-promotion";
+} from './mandate-promotion';
 
 /**
  * Re-export output-guardrails module
@@ -932,7 +937,7 @@ export {
   type GuardrailConfig,
   type GuardrailResult,
   type GuardrailMetrics,
-} from "./output-guardrails";
+} from './output-guardrails';
 
 /**
  * Re-export compaction-hook module
@@ -957,7 +962,7 @@ export {
   createCompactionHook,
   scanSessionMessages,
   type ScannedSwarmState,
-} from "./compaction-hook";
+} from './compaction-hook';
 
 /**
  * Re-export compaction-observability module
@@ -1001,7 +1006,7 @@ export {
   getMetricsSummary,
   type CompactionMetrics,
   type CompactionMetricsSummary,
-} from "./compaction-observability";
+} from './compaction-observability';
 
 /**
  * Re-export memory module
@@ -1030,8 +1035,8 @@ export {
   type StatsResult,
   type HealthResult,
   type OperationResult,
-} from "./memory-tools";
-export type { Memory, SearchResult, SearchOptions } from "swarm-mail";
+} from './memory-tools';
+export type { Memory, SearchResult, SearchOptions } from 'swarm-mail';
 
 /**
  * Re-export eval-history module
@@ -1067,7 +1072,7 @@ export {
   STABILIZATION_THRESHOLD,
   type Phase,
   type EvalRunRecord,
-} from "./eval-history";
+} from './eval-history';
 
 /**
  * Re-export eval-gates module
@@ -1091,7 +1096,7 @@ export {
   DEFAULT_THRESHOLDS,
   type GateResult,
   type GateConfig,
-} from "./eval-gates";
+} from './eval-gates';
 
 /**
  * Re-export logger infrastructure
@@ -1119,7 +1124,7 @@ export {
  * compactionLog.info("Compaction started");
  * ```
  */
-export { getLogger, createChildLogger, logger } from "./logger";
+export { getLogger, createChildLogger, logger } from './logger';
 
 /**
  * Re-export swarm-research module
@@ -1139,7 +1144,7 @@ export {
   researchTools,
   type DiscoveredTool,
   type VersionInfo,
-} from "./swarm-research";
+} from './swarm-research';
 
 /**
  * Re-export queue-tools module
@@ -1169,7 +1174,7 @@ export {
   queue_list,
   queue_cancel,
   resetQueueCache,
-} from "./queue-tools";
+} from './queue-tools';
 
 /**
  * Re-export swarm-validation module
@@ -1196,7 +1201,7 @@ export {
   reportIssue,
   type ValidationIssue,
   type ValidationContext,
-} from "./swarm-validation";
+} from './swarm-validation';
 
 /**
  * Swarm Signature Detection
@@ -1235,7 +1240,7 @@ export {
   type SubtaskState,
   type SubtaskStatus,
   type EpicState,
-} from "./swarm-signature";
+} from './swarm-signature';
 
 /**
  * Coordinator Guard - Runtime Violation Enforcement
@@ -1257,7 +1262,7 @@ export {
   isCoordinator,
   CoordinatorGuardError,
   type GuardCheckResult,
-} from "./coordinator-guard";
+} from './coordinator-guard';
 
 /**
  * Re-export CASS tools module
@@ -1279,4 +1284,11 @@ export {
  * - cass_viewed - When a session is viewed
  * - cass_indexed - When the index is built/rebuilt
  */
-export { cassTools } from "./cass-tools";
+export { cassTools } from './cass-tools';
+
+/**
+ * Docs generation/staleness-check tools (docs_generate, docs_check) and
+ * the underlying driver - config resolution, the fingerprint gate, and
+ * pre-push hook install/uninstall. See src/docs/ for the module.
+ */
+export * from './docs/index.js';

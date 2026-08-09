@@ -118,6 +118,14 @@ import { allTools } from '../src/index.js';
 // Skills (for skill-reload command)
 import { invalidateSkillsCache, discoverSkills } from '../src/skills.js';
 
+// Docs generation/staleness-check/hook commands
+import {
+  checkDocs,
+  generateDocs,
+  installPrePushHook,
+  uninstallPrePushHook,
+} from '../src/docs/index.js';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // When bundled to dist/bin/swarm.js, need to go up two levels to find package.json
 const pkgPath = join(__dirname, '..', '..', 'package.json');
@@ -2908,6 +2916,30 @@ async function setup(forceReinstall = false, nonInteractive = false) {
     }
   }
 
+  // Offer to install the docs staleness pre-push hook - opt-in, never
+  // installed silently. `swarm docs check` itself is a no-op (exit 0) for
+  // a repo with no docsmith.json or no hive cells, so this is safe to
+  // offer unconditionally rather than trying to detect eligibility first.
+  if (!nonInteractive && existsSync(join(process.cwd(), '.git'))) {
+    const installHook = await p.confirm({
+      message:
+        'Install a pre-push hook that gates on documentation staleness (swarm docs check)?',
+      initialValue: false,
+    });
+
+    if (!p.isCancel(installHook) && installHook) {
+      try {
+        const hookResult = installPrePushHook(process.cwd());
+        p.log.success(hookResult.detail);
+      } catch (error) {
+        p.log.warn(
+          'Could not install pre-push hook: ' +
+            (error instanceof Error ? error.message : String(error)),
+        );
+      }
+    }
+  }
+
   // Show setup summary
   const totalFiles = stats.created + stats.updated + stats.unchanged;
   const summaryParts: string[] = [];
@@ -3644,6 +3676,11 @@ ${cyan('Commands:')}
     --yes, -y           Non-interactive with defaults (opus/sonnet/haiku)
   swarm doctor          Health check - shows status of all dependencies
   swarm init      Initialize beads in current project
+  swarm docs      Generate/check docs (runbooks, wiki, blog, policy)
+    generate           Generate docs from the hive corpus (--classifier/--no-classifier)
+    check              Fast staleness check, zero model calls (pre-push gate)
+    install-hook       Install pre-push hook running 'swarm docs check'
+    uninstall-hook     Remove the pre-push hook
   swarm config    Show paths to generated config files
   swarm agents    Update AGENTS.md with skill awareness
   swarm migrate   Migrate PGlite database to libSQL
@@ -4998,6 +5035,76 @@ async function logs() {
     }
     console.log();
   }
+}
+
+// ============================================================================
+// Docs Commands (generate, check, install-hook, uninstall-hook)
+// ============================================================================
+
+async function docsGenerateCommand(classifierOverride?: boolean) {
+  p.intro('swarm docs generate');
+  const s = p.spinner();
+  s.start('Resolving config...');
+
+  try {
+    const result = await generateDocs({
+      repoPath: process.cwd(),
+      classifierOverride,
+      onProgress: (message) => s.message(message),
+    });
+
+    if (result.skipped) {
+      s.stop('Skipped');
+      p.log.warn(result.skipReason ?? 'Nothing to generate.');
+      p.outro('No docs generated.');
+      return;
+    }
+
+    s.stop('Done');
+    const deliverableEntries = Object.entries(result.deliverables);
+    if (deliverableEntries.length === 0) {
+      p.log.info('No deliverables enabled in docsmith.json.');
+    }
+    for (const [kind, deliverable] of deliverableEntries) {
+      p.log.success(
+        `${kind}: ${deliverable.written} written, ${deliverable.excluded} excluded`,
+      );
+      p.log.message(dim('  ' + deliverable.outputPath));
+    }
+    p.outro('Docs generated.');
+  } catch (error) {
+    s.stop('Failed');
+    p.log.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+}
+
+async function docsCheckCommand() {
+  const result = await checkDocs({ repoPath: process.cwd() });
+  const icon =
+    result.status === 'stale'
+      ? red('✗')
+      : result.status === 'fresh'
+        ? green('✓')
+        : dim('ℹ');
+  console.log(`${icon} [${result.status}] ${result.message}`);
+  process.exit(result.exitCode);
+}
+
+async function docsInstallHookCommand() {
+  try {
+    const result = installPrePushHook(process.cwd());
+    console.log(result.detail);
+    console.log(dim('  ' + result.hookPath));
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+}
+
+async function docsUninstallHookCommand() {
+  const result = uninstallPrePushHook(process.cwd());
+  console.log(result.detail);
 }
 
 // ============================================================================
@@ -7587,6 +7694,41 @@ switch (command) {
   case 'init':
     await init();
     break;
+  case 'docs': {
+    const sub = process.argv[3];
+    const classifierFlag = process.argv.includes('--classifier');
+    const noClassifierFlag = process.argv.includes('--no-classifier');
+    const classifierOverride = classifierFlag
+      ? true
+      : noClassifierFlag
+        ? false
+        : undefined;
+    switch (sub) {
+      case 'generate':
+        await docsGenerateCommand(classifierOverride);
+        break;
+      case 'check':
+        await docsCheckCommand();
+        break;
+      case 'install-hook':
+        await docsInstallHookCommand();
+        break;
+      case 'uninstall-hook':
+        await docsUninstallHookCommand();
+        break;
+      default:
+        console.error(`Unknown docs subcommand: ${sub ?? '(none)'}`);
+        console.log(
+          '\nUsage: swarm docs <generate|check|install-hook|uninstall-hook>',
+        );
+        console.log('  generate  [--classifier|--no-classifier]');
+        console.log('  check');
+        console.log('  install-hook');
+        console.log('  uninstall-hook');
+        process.exit(1);
+    }
+    break;
+  }
   case 'config':
     config();
     break;
